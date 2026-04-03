@@ -1,5 +1,5 @@
 <p align="center">
-  <h1 align="center">fibersse</h1>
+  <h1 align="center">FiberSSE</h1>
   <p align="center">
     Production-grade Server-Sent Events (SSE) for <a href="https://github.com/gofiber/fiber">Fiber v3</a>
   </p>
@@ -8,10 +8,15 @@
     <a href="https://goreportcard.com/report/github.com/vinod-morya/fibersse"><img src="https://goreportcard.com/badge/github.com/vinod-morya/fibersse" alt="Go Report Card"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
     <a href="https://github.com/vinod-morya/fibersse/releases"><img src="https://img.shields.io/github/v/release/vinod-morya/fibersse" alt="Release"></a>
+    <a href="https://www.npmjs.com/package/fibersse-react"><img src="https://img.shields.io/npm/v/fibersse-react?label=React%20SDK&color=blue" alt="npm"></a>
   </p>
 </p>
 
 ---
+
+> **React SDK available:** [`npm install fibersse-react`](https://www.npmjs.com/package/fibersse-react) — hooks for TanStack Query / SWR cache invalidation. [GitHub](https://github.com/vinod-morya/fibersse-react)
+>
+> **Blog:** [How We Eliminated 90% of API Calls by Replacing Polling with SSE](https://personacart.com/blog/how-we-eliminated-90-percent-api-calls-replacing-polling-with-sse)
 
 **Stop polling. Start pushing.** The only SSE library built natively for [Fiber v3](https://github.com/gofiber/fiber) — with built-in cache invalidation, event coalescing, and one-line domain event publishing.
 
@@ -27,7 +32,7 @@ hub.Invalidate("orders", order.ID, "created")  // → client refetches instantly
 
 **80-90% fewer API calls. Real-time UI. Zero polling.**
 
-## Why fibersse?
+## Why FiberSSE?
 
 ### 1. The Only SSE Library That Works on Fiber
 
@@ -648,7 +653,7 @@ Current: **v0.3.0**.
 ## Roadmap
 
 - [ ] Redis Streams Replayer (durable replay across server restarts)
-- [ ] TypeScript client SDK (`@vinod-morya/fibersse-client`) with React hooks
+- [x] React SDK ([`fibersse-react`](https://www.npmjs.com/package/fibersse-react)) — `useSSE()` and `useSSEInvalidation()` hooks
 - [ ] Admin Dashboard (web UI for live connection monitoring)
 - [ ] WebSocket fallback transport
 - [ ] Load testing CLI (`fibersse-bench`)
