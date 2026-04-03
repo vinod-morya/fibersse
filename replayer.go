@@ -136,19 +136,6 @@ func (r *MemoryReplayer) Replay(lastEventID string, topics []string) ([]Marshale
 	return result, nil
 }
 
-// matchesAnyTopic returns true if the two topic sets share at least one key (exact match).
-func matchesAnyTopic(a, b map[string]struct{}) bool {
-	if len(a) > len(b) {
-		a, b = b, a
-	}
-	for k := range a {
-		if _, ok := b[k]; ok {
-			return true
-		}
-	}
-	return false
-}
-
 // matchesAnyTopicWithWildcards returns true if any subscription pattern
 // (which may contain wildcards) matches any of the stored event topics.
 func matchesAnyTopicWithWildcards(subscriptionPatterns []string, eventTopics map[string]struct{}) bool {

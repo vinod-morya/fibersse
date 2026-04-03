@@ -141,15 +141,6 @@ func (c *Connection) writeLoop(w *bufio.Writer) {
 	}
 }
 
-// topicSet returns the connection's topics as a set for fast lookup.
-func (c *Connection) topicSet() map[string]struct{} {
-	s := make(map[string]struct{}, len(c.Topics))
-	for _, t := range c.Topics {
-		s[t] = struct{}{}
-	}
-	return s
-}
-
 // connMatchesGroup returns true if ALL key-value pairs in the group
 // match the connection's metadata.
 func connMatchesGroup(conn *Connection, group map[string]string) bool {
