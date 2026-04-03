@@ -332,17 +332,20 @@ func (h *Hub) Handler() fiber.Handler {
 			go func() {
 				select {
 				case <-h.shutdown:
-					shutdownEvt := MarshaledEvent{
-						ID:    nextEventID(),
-						Type:  "server-shutdown",
-						Data:  "{}",
-						Retry: -1,
+					if !conn.IsClosed() {
+						shutdownEvt := MarshaledEvent{
+							ID:    nextEventID(),
+							Type:  "server-shutdown",
+							Data:  "{}",
+							Retry: -1,
+						}
+						conn.trySend(shutdownEvt)
+						// Give the writer a moment to flush before closing
+						time.Sleep(200 * time.Millisecond)
 					}
-					conn.trySend(shutdownEvt)
-					// Give the writer a moment to flush, then close
-					time.Sleep(100 * time.Millisecond)
 					conn.Close()
 				case <-conn.done:
+					// Connection closed normally — nothing to do
 				}
 			}()
 
@@ -363,6 +366,10 @@ func (h *Hub) run() {
 	heartbeatTicker := time.NewTicker(h.cfg.HeartbeatInterval)
 	defer heartbeatTicker.Stop()
 
+	// Periodic cleanup of stale throttler entries (every 5 minutes)
+	cleanupTicker := time.NewTicker(5 * time.Minute)
+	defer cleanupTicker.Stop()
+
 	for {
 		select {
 		case conn := <-h.register:
@@ -379,6 +386,9 @@ func (h *Hub) run() {
 
 		case <-heartbeatTicker.C:
 			h.sendHeartbeats()
+
+		case <-cleanupTicker.C:
+			h.throttler.cleanup(time.Now().Add(-10 * time.Minute))
 
 		case <-h.shutdown:
 			// Close all remaining connections
@@ -552,16 +562,22 @@ func (h *Hub) deliverToConn(conn *Connection, event Event, me MarshaledEvent) {
 
 // flushAll drains each connection's coalescer and sends buffered events.
 // Uses adaptive throttling — connections with full buffers get flushed less often.
+// Snapshots the connection list under RLock then releases before flushing.
 func (h *Hub) flushAll() {
 	h.mu.RLock()
-	defer h.mu.RUnlock()
-
+	conns := make([]*Connection, 0, len(h.connections))
 	for _, conn := range h.connections {
-		if conn.IsClosed() || conn.paused.Load() {
-			continue
+		if !conn.IsClosed() && !conn.paused.Load() {
+			conns = append(conns, conn)
+		}
+	}
+	h.mu.RUnlock()
+
+	for _, conn := range conns {
+		if conn.IsClosed() {
+			continue // may have closed since snapshot
 		}
 
-		// Adaptive throttle: check buffer saturation
 		bufCap := cap(conn.send)
 		saturation := float64(0)
 		if bufCap > 0 {

@@ -90,3 +90,15 @@ func (at *adaptiveThrottler) remove(connID string) {
 	delete(at.lastFlush, connID)
 	at.mu.Unlock()
 }
+
+// cleanup removes stale entries older than the given cutoff.
+// Called periodically by the hub's run loop to prevent unbounded growth.
+func (at *adaptiveThrottler) cleanup(cutoff time.Time) {
+	at.mu.Lock()
+	defer at.mu.Unlock()
+	for k, v := range at.lastFlush {
+		if v.Before(cutoff) {
+			delete(at.lastFlush, k)
+		}
+	}
+}

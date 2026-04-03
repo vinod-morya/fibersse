@@ -89,11 +89,28 @@ type memTicket struct {
 	expires time.Time
 }
 
-// NewMemoryTicketStore creates an in-memory ticket store.
+// NewMemoryTicketStore creates an in-memory ticket store with a background
+// cleanup goroutine that evicts expired tickets every 30 seconds.
 func NewMemoryTicketStore() *MemoryTicketStore {
-	return &MemoryTicketStore{
+	s := &MemoryTicketStore{
 		tickets: make(map[string]memTicket),
 	}
+	// Background cleanup prevents unbounded memory growth from unconsumed tickets
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			s.mu.Lock()
+			now := time.Now()
+			for k, v := range s.tickets {
+				if now.After(v.expires) {
+					delete(s.tickets, k)
+				}
+			}
+			s.mu.Unlock()
+		}
+	}()
+	return s
 }
 
 func (s *MemoryTicketStore) Set(ticket string, value string, ttl time.Duration) error {

@@ -1,9 +1,8 @@
 package fibersse
 
 import (
-	"encoding/json"
 	"fmt"
-	"sync/atomic"
+	"math"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -158,21 +157,11 @@ func appendProm(buf []byte, name, labels string, value float64) []byte {
 }
 
 func formatFloat(f float64) string {
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return "0"
+	}
 	if f == float64(int64(f)) {
-		return json.Number(fmt.Sprintf("%d", int64(f))).String()
+		return fmt.Sprintf("%d", int64(f))
 	}
-	return json.Number(fmt.Sprintf("%.6f", f)).String()
-}
-
-// atomicMax atomically updates an atomic.Int64 to the max of its current value and v.
-func atomicMax(a *atomic.Int64, v int64) {
-	for {
-		old := a.Load()
-		if v <= old {
-			return
-		}
-		if a.CompareAndSwap(old, v) {
-			return
-		}
-	}
+	return fmt.Sprintf("%.6f", f)
 }
