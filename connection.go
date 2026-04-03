@@ -33,7 +33,7 @@ type Connection struct {
 
 	// send is the buffered channel for delivering events to the writer goroutine.
 	// If the channel is full, events are dropped (backpressure).
-	send chan marshaledEvent
+	send chan MarshaledEvent
 
 	// done is closed when the connection is terminated (client disconnect or shutdown).
 	done chan struct{}
@@ -58,7 +58,7 @@ func newConnection(id string, topics []string, bufferSize int, flushInterval tim
 		Topics:    topics,
 		Metadata:  make(map[string]string),
 		CreatedAt: time.Now(),
-		send:      make(chan marshaledEvent, bufferSize),
+		send:      make(chan MarshaledEvent, bufferSize),
 		done:      make(chan struct{}),
 	}
 	c.lastWrite.Store(time.Now())
@@ -86,7 +86,7 @@ func (c *Connection) IsClosed() bool {
 
 // trySend attempts to deliver an event to the connection's send channel.
 // Returns false if the buffer is full (backpressure).
-func (c *Connection) trySend(me marshaledEvent) bool {
+func (c *Connection) trySend(me MarshaledEvent) bool {
 	select {
 	case c.send <- me:
 		return true
@@ -113,7 +113,7 @@ func (c *Connection) writeLoop(w *bufio.Writer) {
 				return
 			}
 			// Heartbeat: write as a comment, not a data event
-			if me.id == heartbeatMarker {
+			if me.ID == heartbeatMarker {
 				if err := writeComment(w, "heartbeat"); err != nil {
 					c.Close()
 					return
@@ -134,8 +134,8 @@ func (c *Connection) writeLoop(w *bufio.Writer) {
 			}
 			c.MessagesSent.Add(1)
 			c.lastWrite.Store(time.Now())
-			if me.id != "" {
-				c.LastEventID.Store(me.id)
+			if me.ID != "" {
+				c.LastEventID.Store(me.ID)
 			}
 		}
 	}

@@ -1,3 +1,26 @@
+// Package fibersse provides a production-grade Server-Sent Events (SSE)
+// hub for Fiber v3. It is the only SSE library built natively for
+// Fiber's fasthttp-based architecture — no net/http adapters or broken
+// disconnect detection.
+//
+// Key features: event coalescing (last-writer-wins), three priority lanes
+// (instant/batched/coalesced), NATS-style topic wildcards, adaptive
+// per-connection throttling, connection groups (publish by metadata),
+// built-in JWT and ticket auth helpers, Prometheus metrics, graceful
+// Kubernetes-style drain, auto fan-out from Redis/NATS, and pluggable
+// Last-Event-ID replay.
+//
+// Quick start:
+//
+//	hub := fibersse.New(fibersse.HubConfig{
+//	    FlushInterval: 2 * time.Second,
+//	    OnConnect: func(c fiber.Ctx, conn *fibersse.Connection) error {
+//	        conn.Topics = []string{"notifications", "live"}
+//	        return nil
+//	    },
+//	})
+//	app.Get("/events", hub.Handler())
+//	hub.Publish(fibersse.Event{Type: "ping", Data: "hello", Topics: []string{"live"}})
 package fibersse
 
 import (
@@ -279,11 +302,11 @@ func (h *Hub) Handler() fiber.Handler {
 			}
 
 			// Send connected event
-			connected := marshaledEvent{
-				id:    nextEventID(),
-				typ:   "connected",
-				data:  fmt.Sprintf(`{"connection_id":"%s","topics":%s}`, conn.ID, topicsJSON(conn.Topics)),
-				retry: -1,
+			connected := MarshaledEvent{
+				ID:    nextEventID(),
+				Type:  "connected",
+				Data:  fmt.Sprintf(`{"connection_id":"%s","topics":%s}`, conn.ID, topicsJSON(conn.Topics)),
+				Retry: -1,
 			}
 			if _, err := connected.WriteTo(w); err != nil {
 				return
@@ -309,11 +332,11 @@ func (h *Hub) Handler() fiber.Handler {
 			go func() {
 				select {
 				case <-h.shutdown:
-					shutdownEvt := marshaledEvent{
-						id:    nextEventID(),
-						typ:   "server-shutdown",
-						data:  "{}",
-						retry: -1,
+					shutdownEvt := MarshaledEvent{
+						ID:    nextEventID(),
+						Type:  "server-shutdown",
+						Data:  "{}",
+						Retry: -1,
 					}
 					conn.trySend(shutdownEvt)
 					// Give the writer a moment to flush, then close
@@ -510,7 +533,7 @@ func (h *Hub) routeEvent(event Event) {
 }
 
 // deliverToConn routes an event to a connection based on priority.
-func (h *Hub) deliverToConn(conn *Connection, event Event, me marshaledEvent) {
+func (h *Hub) deliverToConn(conn *Connection, event Event, me MarshaledEvent) {
 	switch event.Priority {
 	case PriorityInstant:
 		if !conn.trySend(me) {
@@ -573,13 +596,9 @@ func (h *Hub) sendHeartbeats() {
 		lastWrite, _ := conn.lastWrite.Load().(time.Time)
 		if now.Sub(lastWrite) >= h.cfg.HeartbeatInterval {
 			// Send a heartbeat as a zero-type event via the send channel
-			hb := marshaledEvent{
-				id:    "",
-				typ:   "",
-				data:  "",
-				retry: -1,
+			hb := MarshaledEvent{
+				ID: heartbeatMarker,
 			}
-			hb.id = heartbeatMarker
 			conn.trySend(hb)
 		}
 	}

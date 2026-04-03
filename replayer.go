@@ -9,17 +9,17 @@ import (
 // Implement this interface to use Redis Streams, a database, or any durable store.
 type Replayer interface {
 	// Store persists an event for potential future replay.
-	Store(event marshaledEvent, topics []string) error
+	Store(event MarshaledEvent, topics []string) error
 
 	// Replay returns all events after lastEventID that match any of the given topics.
 	// Events are returned in chronological order.
 	// Returns nil, nil if lastEventID is not found (client should receive full state).
-	Replay(lastEventID string, topics []string) ([]marshaledEvent, error)
+	Replay(lastEventID string, topics []string) ([]MarshaledEvent, error)
 }
 
 // replayEntry pairs an event with its topic set for filtering.
 type replayEntry struct {
-	event     marshaledEvent
+	event     MarshaledEvent
 	topics    map[string]struct{}
 	timestamp time.Time
 }
@@ -64,7 +64,7 @@ func NewMemoryReplayer(cfg ...MemoryReplayerConfig) *MemoryReplayer {
 }
 
 // Store adds an event to the replay buffer.
-func (r *MemoryReplayer) Store(event marshaledEvent, topics []string) error {
+func (r *MemoryReplayer) Store(event MarshaledEvent, topics []string) error {
 	topicSet := make(map[string]struct{}, len(topics))
 	for _, t := range topics {
 		topicSet[t] = struct{}{}
@@ -89,7 +89,7 @@ func (r *MemoryReplayer) Store(event marshaledEvent, topics []string) error {
 }
 
 // Replay returns events after lastEventID matching the given topics.
-func (r *MemoryReplayer) Replay(lastEventID string, topics []string) ([]marshaledEvent, error) {
+func (r *MemoryReplayer) Replay(lastEventID string, topics []string) ([]MarshaledEvent, error) {
 	if lastEventID == "" {
 		return nil, nil
 	}
@@ -107,7 +107,7 @@ func (r *MemoryReplayer) Replay(lastEventID string, topics []string) ([]marshale
 	// Find the position of lastEventID
 	startIdx := -1
 	for i, entry := range r.entries {
-		if entry.event.id == lastEventID {
+		if entry.event.ID == lastEventID {
 			startIdx = i + 1
 			break
 		}
@@ -118,7 +118,7 @@ func (r *MemoryReplayer) Replay(lastEventID string, topics []string) ([]marshale
 		return nil, nil
 	}
 
-	var result []marshaledEvent
+	var result []MarshaledEvent
 	for i := startIdx; i < len(r.entries); i++ {
 		entry := r.entries[i]
 

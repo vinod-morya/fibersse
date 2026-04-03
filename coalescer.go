@@ -11,10 +11,10 @@ type coalescer struct {
 	mu sync.Mutex
 
 	// batched holds P1 events in insertion order — all are sent on flush.
-	batched []marshaledEvent
+	batched []MarshaledEvent
 
 	// coalesced holds P2 events keyed by CoalesceKey — only the latest per key survives.
-	coalesced map[string]marshaledEvent
+	coalesced map[string]MarshaledEvent
 
 	// coalescedOrder preserves first-seen order of coalesce keys for deterministic output.
 	coalescedOrder []string
@@ -27,13 +27,13 @@ type coalescer struct {
 // newCoalescer creates a coalescer with the given flush interval hint.
 func newCoalescer(flushInterval time.Duration) *coalescer {
 	return &coalescer{
-		coalesced:     make(map[string]marshaledEvent),
+		coalesced:     make(map[string]MarshaledEvent),
 		flushInterval: flushInterval,
 	}
 }
 
 // addBatched appends a P1 event to the batch buffer.
-func (c *coalescer) addBatched(me marshaledEvent) {
+func (c *coalescer) addBatched(me MarshaledEvent) {
 	c.mu.Lock()
 	c.batched = append(c.batched, me)
 	c.mu.Unlock()
@@ -41,7 +41,7 @@ func (c *coalescer) addBatched(me marshaledEvent) {
 
 // addCoalesced upserts a P2 event by its coalesce key. If the key already
 // exists, the previous event is overwritten (last-writer-wins).
-func (c *coalescer) addCoalesced(key string, me marshaledEvent) {
+func (c *coalescer) addCoalesced(key string, me MarshaledEvent) {
 	c.mu.Lock()
 	if _, exists := c.coalesced[key]; !exists {
 		c.coalescedOrder = append(c.coalescedOrder, key)
@@ -53,7 +53,7 @@ func (c *coalescer) addCoalesced(key string, me marshaledEvent) {
 // flush drains both buffers and returns the events to send, in order:
 // batched events first, then coalesced events in first-seen order.
 // Returns nil if both buffers are empty.
-func (c *coalescer) flush() []marshaledEvent {
+func (c *coalescer) flush() []MarshaledEvent {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -64,7 +64,7 @@ func (c *coalescer) flush() []marshaledEvent {
 		return nil
 	}
 
-	result := make([]marshaledEvent, 0, batchLen+coalLen)
+	result := make([]MarshaledEvent, 0, batchLen+coalLen)
 
 	// Append all batched events
 	if batchLen > 0 {
@@ -77,7 +77,7 @@ func (c *coalescer) flush() []marshaledEvent {
 		for _, key := range c.coalescedOrder {
 			result = append(result, c.coalesced[key])
 		}
-		c.coalesced = make(map[string]marshaledEvent, coalLen)
+		c.coalesced = make(map[string]MarshaledEvent, coalLen)
 		c.coalescedOrder = c.coalescedOrder[:0]
 	}
 

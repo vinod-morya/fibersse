@@ -16,14 +16,14 @@ func TestMarshalEvent_JSON(t *testing.T) {
 	}
 	me := marshalEvent(e)
 
-	if me.id != "evt_1" {
-		t.Errorf("expected id evt_1, got %s", me.id)
+	if me.ID != "evt_1" {
+		t.Errorf("expected id evt_1, got %s", me.ID)
 	}
-	if me.typ != "notification" {
-		t.Errorf("expected type notification, got %s", me.typ)
+	if me.Type != "notification" {
+		t.Errorf("expected type notification, got %s", me.Type)
 	}
-	if !strings.Contains(me.data, `"title":"Hello"`) {
-		t.Errorf("expected JSON data, got %s", me.data)
+	if !strings.Contains(me.Data, `"title":"Hello"`) {
+		t.Errorf("expected JSON data, got %s", me.Data)
 	}
 }
 
@@ -34,28 +34,28 @@ func TestMarshalEvent_String(t *testing.T) {
 		ID:   "evt_2",
 	}
 	me := marshalEvent(e)
-	if me.data != "hello world" {
-		t.Errorf("expected string data, got %s", me.data)
+	if me.Data != "hello world" {
+		t.Errorf("expected string data, got %s", me.Data)
 	}
 }
 
 func TestMarshalEvent_AutoID(t *testing.T) {
 	e := &Event{Type: "test", Data: "x"}
 	me := marshalEvent(e)
-	if me.id == "" {
+	if me.ID == "" {
 		t.Error("expected auto-generated ID")
 	}
-	if !strings.HasPrefix(me.id, "evt_") {
-		t.Errorf("expected evt_ prefix, got %s", me.id)
+	if !strings.HasPrefix(me.ID, "evt_") {
+		t.Errorf("expected evt_ prefix, got %s", me.ID)
 	}
 }
 
 func TestMarshaledEvent_WriteTo(t *testing.T) {
-	me := marshaledEvent{
-		id:    "evt_42",
-		typ:   "message",
-		data:  `{"text":"hello"}`,
-		retry: -1,
+	me := MarshaledEvent{
+		ID:    "evt_42",
+		Type:  "message",
+		Data:  `{"text":"hello"}`,
+		Retry: -1,
 	}
 	var buf bytes.Buffer
 	_, err := me.WriteTo(&buf)
@@ -79,9 +79,9 @@ func TestMarshaledEvent_WriteTo(t *testing.T) {
 }
 
 func TestMarshaledEvent_MultilineData(t *testing.T) {
-	me := marshaledEvent{
-		id:   "evt_1",
-		data: "line1\nline2\nline3",
+	me := MarshaledEvent{
+		ID:   "evt_1",
+		Data: "line1\nline2\nline3",
 	}
 	var buf bytes.Buffer
 	me.WriteTo(&buf)
@@ -101,15 +101,15 @@ func TestMarshaledEvent_MultilineData(t *testing.T) {
 func TestCoalescer_Batched(t *testing.T) {
 	c := newCoalescer(time.Second)
 
-	c.addBatched(marshaledEvent{id: "1", data: "a"})
-	c.addBatched(marshaledEvent{id: "2", data: "b"})
-	c.addBatched(marshaledEvent{id: "3", data: "c"})
+	c.addBatched(MarshaledEvent{ID: "1", Data: "a"})
+	c.addBatched(MarshaledEvent{ID: "2", Data: "b"})
+	c.addBatched(MarshaledEvent{ID: "3", Data: "c"})
 
 	events := c.flush()
 	if len(events) != 3 {
 		t.Fatalf("expected 3 batched events, got %d", len(events))
 	}
-	if events[0].data != "a" || events[1].data != "b" || events[2].data != "c" {
+	if events[0].Data != "a" || events[1].Data != "b" || events[2].Data != "c" {
 		t.Error("batched events out of order")
 	}
 
@@ -124,27 +124,27 @@ func TestCoalescer_Coalesced(t *testing.T) {
 	c := newCoalescer(time.Second)
 
 	// Simulate progress: 5% → 6% → 7% → 8%
-	c.addCoalesced("task:123", marshaledEvent{id: "1", data: `{"pct":5}`})
-	c.addCoalesced("task:123", marshaledEvent{id: "2", data: `{"pct":6}`})
-	c.addCoalesced("task:123", marshaledEvent{id: "3", data: `{"pct":7}`})
-	c.addCoalesced("task:123", marshaledEvent{id: "4", data: `{"pct":8}`})
+	c.addCoalesced("task:123", MarshaledEvent{ID: "1", Data: `{"pct":5}`})
+	c.addCoalesced("task:123", MarshaledEvent{ID: "2", Data: `{"pct":6}`})
+	c.addCoalesced("task:123", MarshaledEvent{ID: "3", Data: `{"pct":7}`})
+	c.addCoalesced("task:123", MarshaledEvent{ID: "4", Data: `{"pct":8}`})
 
 	events := c.flush()
 	if len(events) != 1 {
 		t.Fatalf("expected 1 coalesced event, got %d", len(events))
 	}
-	if events[0].data != `{"pct":8}` {
-		t.Errorf("expected latest value {pct:8}, got %s", events[0].data)
+	if events[0].Data != `{"pct":8}` {
+		t.Errorf("expected latest value {pct:8}, got %s", events[0].Data)
 	}
 }
 
 func TestCoalescer_Mixed(t *testing.T) {
 	c := newCoalescer(time.Second)
 
-	c.addBatched(marshaledEvent{id: "b1", data: "batch1"})
-	c.addCoalesced("key1", marshaledEvent{id: "c1", data: "old"})
-	c.addCoalesced("key1", marshaledEvent{id: "c2", data: "new"})
-	c.addBatched(marshaledEvent{id: "b2", data: "batch2"})
+	c.addBatched(MarshaledEvent{ID: "b1", Data: "batch1"})
+	c.addCoalesced("key1", MarshaledEvent{ID: "c1", Data: "old"})
+	c.addCoalesced("key1", MarshaledEvent{ID: "c2", Data: "new"})
+	c.addBatched(MarshaledEvent{ID: "b2", Data: "batch2"})
 
 	events := c.flush()
 	// Should be: 2 batched + 1 coalesced = 3
@@ -152,41 +152,41 @@ func TestCoalescer_Mixed(t *testing.T) {
 		t.Fatalf("expected 3 events, got %d", len(events))
 	}
 	// Batched come first
-	if events[0].data != "batch1" || events[1].data != "batch2" {
+	if events[0].Data != "batch1" || events[1].Data != "batch2" {
 		t.Error("batched events should come first in order")
 	}
 	// Coalesced last, only latest
-	if events[2].data != "new" {
-		t.Errorf("expected coalesced 'new', got %s", events[2].data)
+	if events[2].Data != "new" {
+		t.Errorf("expected coalesced 'new', got %s", events[2].Data)
 	}
 }
 
 func TestCoalescer_MultipleKeys(t *testing.T) {
 	c := newCoalescer(time.Second)
 
-	c.addCoalesced("task:A", marshaledEvent{id: "1", data: "A-old"})
-	c.addCoalesced("task:B", marshaledEvent{id: "2", data: "B-old"})
-	c.addCoalesced("task:A", marshaledEvent{id: "3", data: "A-new"})
+	c.addCoalesced("task:A", MarshaledEvent{ID: "1", Data: "A-old"})
+	c.addCoalesced("task:B", MarshaledEvent{ID: "2", Data: "B-old"})
+	c.addCoalesced("task:A", MarshaledEvent{ID: "3", Data: "A-new"})
 
 	events := c.flush()
 	if len(events) != 2 {
 		t.Fatalf("expected 2 coalesced events, got %d", len(events))
 	}
 	// First-seen order: A then B
-	if events[0].data != "A-new" {
-		t.Errorf("expected A-new, got %s", events[0].data)
+	if events[0].Data != "A-new" {
+		t.Errorf("expected A-new, got %s", events[0].Data)
 	}
-	if events[1].data != "B-old" {
-		t.Errorf("expected B-old, got %s", events[1].data)
+	if events[1].Data != "B-old" {
+		t.Errorf("expected B-old, got %s", events[1].Data)
 	}
 }
 
 func TestMemoryReplayer(t *testing.T) {
 	r := NewMemoryReplayer(MemoryReplayerConfig{MaxEvents: 100, TTL: time.Minute})
 
-	r.Store(marshaledEvent{id: "evt_1", typ: "a", data: "1"}, []string{"topic1"})
-	r.Store(marshaledEvent{id: "evt_2", typ: "b", data: "2"}, []string{"topic1", "topic2"})
-	r.Store(marshaledEvent{id: "evt_3", typ: "c", data: "3"}, []string{"topic2"})
+	r.Store(MarshaledEvent{ID: "evt_1", Type: "a", Data: "1"}, []string{"topic1"})
+	r.Store(MarshaledEvent{ID: "evt_2", Type: "b", Data: "2"}, []string{"topic1", "topic2"})
+	r.Store(MarshaledEvent{ID: "evt_3", Type: "c", Data: "3"}, []string{"topic2"})
 
 	// Replay after evt_1, topic1 — should get evt_2 only (evt_3 is topic2 only)
 	events, err := r.Replay("evt_1", []string{"topic1"})
@@ -196,8 +196,8 @@ func TestMemoryReplayer(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("expected 1 event, got %d", len(events))
 	}
-	if events[0].id != "evt_2" {
-		t.Errorf("expected evt_2, got %s", events[0].id)
+	if events[0].ID != "evt_2" {
+		t.Errorf("expected evt_2, got %s", events[0].ID)
 	}
 
 	// Replay after evt_1, both topics — should get evt_2 and evt_3
@@ -222,10 +222,10 @@ func TestMemoryReplayer(t *testing.T) {
 func TestMemoryReplayer_MaxEvents(t *testing.T) {
 	r := NewMemoryReplayer(MemoryReplayerConfig{MaxEvents: 3, TTL: time.Minute})
 
-	r.Store(marshaledEvent{id: "1"}, []string{"t"})
-	r.Store(marshaledEvent{id: "2"}, []string{"t"})
-	r.Store(marshaledEvent{id: "3"}, []string{"t"})
-	r.Store(marshaledEvent{id: "4"}, []string{"t"})
+	r.Store(MarshaledEvent{ID: "1"}, []string{"t"})
+	r.Store(MarshaledEvent{ID: "2"}, []string{"t"})
+	r.Store(MarshaledEvent{ID: "3"}, []string{"t"})
+	r.Store(MarshaledEvent{ID: "4"}, []string{"t"})
 
 	// Event "1" should be evicted
 	events, _ := r.Replay("1", []string{"t"})
@@ -244,14 +244,14 @@ func TestConnection_TrySend_Backpressure(t *testing.T) {
 	conn := newConnection("test", []string{"t"}, 2, time.Second)
 
 	// Fill the buffer
-	if !conn.trySend(marshaledEvent{id: "1"}) {
+	if !conn.trySend(MarshaledEvent{ID: "1"}) {
 		t.Error("first send should succeed")
 	}
-	if !conn.trySend(marshaledEvent{id: "2"}) {
+	if !conn.trySend(MarshaledEvent{ID: "2"}) {
 		t.Error("second send should succeed")
 	}
 	// Third should fail (buffer full)
-	if conn.trySend(marshaledEvent{id: "3"}) {
+	if conn.trySend(MarshaledEvent{ID: "3"}) {
 		t.Error("third send should fail (backpressure)")
 	}
 	if conn.MessagesDropped.Load() != 1 {

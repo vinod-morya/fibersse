@@ -331,8 +331,8 @@ Implement the `Replayer` interface for Redis Streams or any durable store:
 
 ```go
 type Replayer interface {
-    Store(event marshaledEvent, topics []string) error
-    Replay(lastEventID string, topics []string) ([]marshaledEvent, error)
+    Store(event MarshaledEvent, topics []string) error
+    Replay(lastEventID string, topics []string) ([]MarshaledEvent, error)
 }
 ```
 

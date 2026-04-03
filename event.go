@@ -77,47 +77,48 @@ func nextEventID() string {
 	return fmt.Sprintf("evt_%d", globalEventID.Add(1))
 }
 
-// marshaledEvent is the internal representation after serialization,
-// ready to be written to a bufio.Writer.
-type marshaledEvent struct {
-	id    string
-	typ   string
-	data  string
-	retry int // -1 means omit
+// MarshaledEvent is the wire-ready representation of an SSE event,
+// produced by marshaling an Event's Data field. External Replayer
+// implementations receive and return this type.
+type MarshaledEvent struct {
+	ID    string
+	Type  string
+	Data  string
+	Retry int // -1 means omit
 }
 
 // marshalEvent converts an Event into wire-ready format.
-func marshalEvent(e *Event) marshaledEvent {
-	me := marshaledEvent{
-		id:    e.ID,
-		typ:   e.Type,
-		retry: -1,
+func marshalEvent(e *Event) MarshaledEvent {
+	me := MarshaledEvent{
+		ID:    e.ID,
+		Type:  e.Type,
+		Retry: -1,
 	}
 
-	if me.id == "" {
-		me.id = nextEventID()
+	if me.ID == "" {
+		me.ID = nextEventID()
 	}
 
 	switch v := e.Data.(type) {
 	case nil:
-		me.data = ""
+		me.Data = ""
 	case string:
-		me.data = v
+		me.Data = v
 	case []byte:
-		me.data = string(v)
+		me.Data = string(v)
 	case json.Marshaler:
 		b, err := v.MarshalJSON()
 		if err != nil {
-			me.data = fmt.Sprintf(`{"error":"marshal failed: %s"}`, err)
+			me.Data = fmt.Sprintf(`{"error":"marshal failed: %s"}`, err)
 		} else {
-			me.data = string(b)
+			me.Data = string(b)
 		}
 	default:
 		b, err := json.Marshal(v)
 		if err != nil {
-			me.data = fmt.Sprintf(`{"error":"marshal failed: %s"}`, err)
+			me.Data = fmt.Sprintf(`{"error":"marshal failed: %s"}`, err)
 		} else {
-			me.data = string(b)
+			me.Data = string(b)
 		}
 	}
 
@@ -132,12 +133,12 @@ func marshalEvent(e *Event) marshaledEvent {
 //	data: <line1>
 //	data: <line2>
 //	<blank line>
-func (me *marshaledEvent) WriteTo(w io.Writer) (int64, error) {
+func (me *MarshaledEvent) WriteTo(w io.Writer) (int64, error) {
 	var total int64
 
 	// id: field
-	if me.id != "" {
-		n, err := fmt.Fprintf(w, "id: %s\n", me.id)
+	if me.ID != "" {
+		n, err := fmt.Fprintf(w, "id: %s\n", me.ID)
 		total += int64(n)
 		if err != nil {
 			return total, err
@@ -145,8 +146,8 @@ func (me *marshaledEvent) WriteTo(w io.Writer) (int64, error) {
 	}
 
 	// event: field
-	if me.typ != "" {
-		n, err := fmt.Fprintf(w, "event: %s\n", me.typ)
+	if me.Type != "" {
+		n, err := fmt.Fprintf(w, "event: %s\n", me.Type)
 		total += int64(n)
 		if err != nil {
 			return total, err
@@ -154,8 +155,8 @@ func (me *marshaledEvent) WriteTo(w io.Writer) (int64, error) {
 	}
 
 	// retry: field
-	if me.retry >= 0 {
-		n, err := fmt.Fprintf(w, "retry: %d\n", me.retry)
+	if me.Retry >= 0 {
+		n, err := fmt.Fprintf(w, "retry: %d\n", me.Retry)
 		total += int64(n)
 		if err != nil {
 			return total, err
@@ -163,8 +164,8 @@ func (me *marshaledEvent) WriteTo(w io.Writer) (int64, error) {
 	}
 
 	// data: field — handle multiline payloads
-	if me.data != "" {
-		lines := strings.Split(me.data, "\n")
+	if me.Data != "" {
+		lines := strings.Split(me.Data, "\n")
 		for _, line := range lines {
 			n, err := fmt.Fprintf(w, "data: %s\n", line)
 			total += int64(n)
