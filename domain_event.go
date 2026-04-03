@@ -79,24 +79,37 @@ func (h *Hub) DomainEvent(resource, action, resourceID, tenantID string, hint ma
 //	// In your import worker:
 //	for i, row := range rows {
 //	    processRow(row)
-//	    hub.Progress("import", importID, tenantID, i+1, len(rows))
+//	    hub.Progress("import", importID, tenantID, i+1, len(rows), nil)
 //	}
 //	// Client receives: 0%...25%...50%...75%...100% (not every single row)
-func (h *Hub) Progress(topic, resourceID, tenantID string, current, total int) {
+//
+//	// With hints (optional extra context):
+//	hub.Progress("import", importID, tenantID, 450, 1000, map[string]any{
+//	    "last_sku": "PRD-123",
+//	    "errors":   3,
+//	})
+func (h *Hub) Progress(topic, resourceID, tenantID string, current, total int, hint ...map[string]any) {
 	pct := 0
 	if total > 0 {
 		pct = (current * 100) / total
 	}
 
+	data := map[string]any{
+		"resource_id": resourceID,
+		"current":     current,
+		"total":       total,
+		"pct":         pct,
+	}
+	if len(hint) > 0 && hint[0] != nil {
+		for k, v := range hint[0] {
+			data[k] = v
+		}
+	}
+
 	event := Event{
-		Type:   "progress",
-		Topics: []string{topic},
-		Data: map[string]any{
-			"resource_id": resourceID,
-			"current":     current,
-			"total":       total,
-			"pct":         pct,
-		},
+		Type:        "progress",
+		Topics:      []string{topic},
+		Data:        data,
 		Priority:    PriorityCoalesced,
 		CoalesceKey: "progress:" + topic + ":" + resourceID,
 	}
@@ -143,4 +156,48 @@ func (h *Hub) Complete(topic, resourceID, tenantID string, success bool, hint ma
 	}
 
 	h.Publish(event)
+}
+
+// DomainEventSpec describes a single domain event within a batch.
+type DomainEventSpec struct {
+	Resource   string         `json:"resource"`
+	Action     string         `json:"action"`
+	ResourceID string         `json:"resource_id,omitempty"`
+	Hint       map[string]any `json:"hint,omitempty"`
+}
+
+// BatchDomainEvents publishes multiple domain events as a single SSE frame.
+// Use when one operation triggers multiple resource changes (e.g., order
+// creation affects orders + inventory + dashboard).
+//
+// Client receives one "batch" event with an array of payloads instead of
+// N separate events — allows deduplication of refetches.
+//
+//	hub.BatchDomainEvents("t_123", []fibersse.DomainEventSpec{
+//	    {Resource: "orders", Action: "created", ResourceID: orderID},
+//	    {Resource: "inventory", Action: "updated", ResourceID: productID},
+//	    {Resource: "dashboard", Action: "refresh"},
+//	})
+func (h *Hub) BatchDomainEvents(tenantID string, specs []DomainEventSpec) {
+	if len(specs) == 0 {
+		return
+	}
+	topicSet := make(map[string]struct{})
+	for _, s := range specs {
+		topicSet[s.Resource] = struct{}{}
+	}
+	topics := make([]string, 0, len(topicSet))
+	for t := range topicSet {
+		topics = append(topics, t)
+	}
+	batchEvt := Event{
+		Type:     "batch",
+		Topics:   topics,
+		Data:     specs,
+		Priority: PriorityInstant,
+	}
+	if tenantID != "" {
+		batchEvt.Group = map[string]string{"tenant_id": tenantID}
+	}
+	h.Publish(batchEvt)
 }

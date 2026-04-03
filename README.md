@@ -543,6 +543,99 @@ fibersse/
 └── hub_test.go        29 tests covering all features
 ```
 
+## Integration with TanStack Query / SWR
+
+The canonical pattern for bridging fibersse events to your React data layer:
+
+### TanStack Query (React Query)
+
+```typescript
+import { useQueryClient } from '@tanstack/react-query';
+import { useEffect } from 'react';
+
+function useSSEInvalidation(topics: string[]) {
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    const es = new EventSource(`/events?topics=${topics.join(',')}`);
+
+    // Single resource invalidation
+    es.addEventListener('invalidate', (e) => {
+      const { resource, resource_id, action, hint } = JSON.parse(e.data);
+
+      // Invalidate the collection
+      queryClient.invalidateQueries({ queryKey: [resource] });
+
+      // Invalidate the specific item
+      if (resource_id) {
+        queryClient.invalidateQueries({ queryKey: [resource, resource_id] });
+      }
+
+      // Optional: update cache directly from hint (skip refetch)
+      if (hint && resource_id) {
+        queryClient.setQueryData([resource, resource_id], (old) =>
+          old ? { ...old, ...hint } : old
+        );
+      }
+    });
+
+    // Batch invalidation (multiple resources in one event)
+    es.addEventListener('batch', (e) => {
+      const events = JSON.parse(e.data);
+      const resources = new Set(events.map(e => e.resource));
+      resources.forEach(resource => {
+        queryClient.invalidateQueries({ queryKey: [resource] });
+      });
+    });
+
+    // Progress tracking
+    es.addEventListener('progress', (e) => {
+      const { resource_id, pct } = JSON.parse(e.data);
+      // Update local state for progress bars
+    });
+
+    // Completion
+    es.addEventListener('complete', (e) => {
+      const { resource_id, status } = JSON.parse(e.data);
+      if (status === 'completed') {
+        queryClient.invalidateQueries(); // refetch everything
+      }
+    });
+
+    return () => es.close();
+  }, [topics, queryClient]);
+}
+
+// Usage in any page:
+function OrdersPage() {
+  useSSEInvalidation(['orders', 'dashboard']);
+  const { data } = useQuery({ queryKey: ['orders'], queryFn: fetchOrders });
+  // ↑ Automatically refetches when server publishes hub.Invalidate("orders", ...)
+}
+```
+
+### SWR
+
+```typescript
+import { useSWRConfig } from 'swr';
+
+function useSSEInvalidation(topics: string[]) {
+  const { mutate } = useSWRConfig();
+
+  useEffect(() => {
+    const es = new EventSource(`/events?topics=${topics.join(',')}`);
+
+    es.addEventListener('invalidate', (e) => {
+      const { resource, resource_id } = JSON.parse(e.data);
+      mutate(`/api/${resource}`);
+      if (resource_id) mutate(`/api/${resource}/${resource_id}`);
+    });
+
+    return () => es.close();
+  }, [topics, mutate]);
+}
+```
+
 ## Versioning
 
 This project follows [Semantic Versioning](https://semver.org/):

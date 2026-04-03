@@ -112,6 +112,30 @@ func (h *Hub) InvalidateWithHint(topic, resourceID, action string, hint map[stri
 	})
 }
 
+// InvalidateForTenantWithHint publishes a tenant-scoped invalidation signal
+// with extra data hints. The most common method in multi-tenant SaaS — almost
+// every invalidation is both tenant-scoped and benefits from hints.
+//
+//	hub.InvalidateForTenantWithHint("t_123", "orders", "ord_456", "created", map[string]any{
+//	    "total": 149.99,
+//	    "customer": "John Doe",
+//	})
+func (h *Hub) InvalidateForTenantWithHint(tenantID, topic, resourceID, action string, hint map[string]any) {
+	h.Publish(Event{
+		Type:   "invalidate",
+		Topics: []string{topic},
+		Group:  map[string]string{"tenant_id": tenantID},
+		Data: InvalidationEvent{
+			Resource:   topic,
+			Action:     action,
+			ResourceID: resourceID,
+			Hint:       hint,
+		},
+		Priority:    PriorityInstant,
+		CoalesceKey: "invalidate:" + topic + ":" + resourceID,
+	})
+}
+
 // Signal publishes a simple refresh signal with no resource details.
 // Use for dashboard-level "something changed, refetch everything" signals.
 //

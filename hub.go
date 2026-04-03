@@ -74,6 +74,14 @@ type HubConfig struct {
 	// OnDisconnect is called after a client disconnects. Use for cleanup,
 	// metrics, or releasing connection limit slots.
 	OnDisconnect func(conn *Connection)
+
+	// OnPause is called when a connection is paused (browser tab hidden).
+	// Use for analytics ("how many active viewers") or skipping expensive
+	// queries for paused connections.
+	OnPause func(conn *Connection)
+
+	// OnResume is called when a connection is resumed (browser tab visible).
+	OnResume func(conn *Connection)
 }
 
 func (cfg *HubConfig) defaults() {
@@ -150,6 +158,7 @@ func New(cfg ...HubConfig) *Hub {
 		topicIndex:    make(map[string]map[string]struct{}),
 		wildcardConns: make(map[string]struct{}),
 		throttler:     newAdaptiveThrottler(c.FlushInterval),
+		metrics:       hubMetrics{eventsByType: make(map[string]*atomic.Int64)},
 		stopped:       make(chan struct{}),
 	}
 
@@ -179,7 +188,13 @@ func (h *Hub) SetPaused(connID string, paused bool) {
 	conn, ok := h.connections[connID]
 	h.mu.RUnlock()
 	if ok {
-		conn.paused.Store(paused)
+		wasPaused := conn.paused.Swap(paused)
+		if paused && !wasPaused && h.cfg.OnPause != nil {
+			h.cfg.OnPause(conn)
+		}
+		if !paused && wasPaused && h.cfg.OnResume != nil {
+			h.cfg.OnResume(conn)
+		}
 	}
 }
 
@@ -224,6 +239,7 @@ func (h *Hub) Stats() HubStats {
 		EventsPublished:    h.metrics.eventsPublished.Load(),
 		EventsDropped:      h.metrics.eventsDropped.Load(),
 		ConnectionsByTopic: byTopic,
+		EventsByType:       h.metrics.snapshotEventsByType(),
 	}
 }
 
@@ -476,6 +492,9 @@ func (h *Hub) routeEvent(event Event) {
 	}
 
 	me := marshalEvent(&event)
+
+	// Track per-event-type metrics
+	h.metrics.trackEventType(event.Type)
 
 	// Store for replay
 	if h.cfg.Replayer != nil {

@@ -27,6 +27,9 @@ type MetricsSnapshot struct {
 	AvgBufferSaturation float64 `json:"avg_buffer_saturation"`
 	MaxBufferSaturation float64 `json:"max_buffer_saturation"`
 
+	// EventsByType maps SSE event type to its lifetime count.
+	EventsByType map[string]int64 `json:"events_by_type"`
+
 	// Connections detail (optional, only if IncludeConnections is true)
 	Connections []ConnectionInfo `json:"connections,omitempty"`
 }
@@ -63,6 +66,8 @@ func (h *Hub) Metrics(includeConnections bool) MetricsSnapshot {
 	for topic, conns := range h.topicIndex {
 		snap.ConnectionsByTopic[topic] = len(conns)
 	}
+
+	snap.EventsByType = h.metrics.snapshotEventsByType()
 
 	var totalSat float64
 	var maxSat float64
@@ -143,6 +148,10 @@ func (h *Hub) PrometheusHandler() fiber.Handler {
 
 		for topic, count := range snap.ConnectionsByTopic {
 			lines = appendProm(lines, "fibersse_connections_by_topic", `topic="`+topic+`"`, float64(count))
+		}
+
+		for eventType, count := range snap.EventsByType {
+			lines = appendProm(lines, "fibersse_events_by_type_total", `type="`+eventType+`"`, float64(count))
 		}
 
 		return c.Send(lines)

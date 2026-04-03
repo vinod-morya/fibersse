@@ -1,6 +1,9 @@
 package fibersse
 
-import "sync/atomic"
+import (
+	"sync"
+	"sync/atomic"
+)
 
 // HubStats provides a snapshot of the hub's current state.
 type HubStats struct {
@@ -18,10 +21,59 @@ type HubStats struct {
 
 	// ConnectionsByTopic maps each topic to its subscriber count.
 	ConnectionsByTopic map[string]int `json:"connections_by_topic"`
+
+	// EventsByType maps each SSE event type to its lifetime count.
+	// Example: {"invalidate": 1234, "progress": 567, "signal": 89, "batch": 12}
+	EventsByType map[string]int64 `json:"events_by_type"`
 }
 
 // hubMetrics tracks lifetime counters for the hub.
 type hubMetrics struct {
 	eventsPublished atomic.Int64
 	eventsDropped   atomic.Int64
+
+	// Per-event-type counters
+	eventsByType   map[string]*atomic.Int64
+	eventsByTypeMu sync.RWMutex
+}
+
+// trackEventType increments the counter for a specific event type.
+func (m *hubMetrics) trackEventType(eventType string) {
+	if eventType == "" {
+		eventType = "message"
+	}
+
+	m.eventsByTypeMu.RLock()
+	counter, ok := m.eventsByType[eventType]
+	m.eventsByTypeMu.RUnlock()
+
+	if ok {
+		counter.Add(1)
+		return
+	}
+
+	// First time seeing this event type — create counter under write lock
+	m.eventsByTypeMu.Lock()
+	// Double-check after acquiring write lock
+	if counter, ok = m.eventsByType[eventType]; ok {
+		m.eventsByTypeMu.Unlock()
+		counter.Add(1)
+		return
+	}
+	counter = &atomic.Int64{}
+	counter.Add(1)
+	m.eventsByType[eventType] = counter
+	m.eventsByTypeMu.Unlock()
+}
+
+// snapshotEventsByType returns a copy of the per-event-type counters.
+func (m *hubMetrics) snapshotEventsByType() map[string]int64 {
+	m.eventsByTypeMu.RLock()
+	defer m.eventsByTypeMu.RUnlock()
+
+	result := make(map[string]int64, len(m.eventsByType))
+	for k, v := range m.eventsByType {
+		result[k] = v.Load()
+	}
+	return result
 }

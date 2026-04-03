@@ -102,6 +102,8 @@ Per-connection Writer (inside Fiber SendStreamWriter)
 | `hub.DomainEvent(resource, action, id, tid, hint)` | Structured domain event | P0 Instant |
 | `hub.Progress(topic, id, tid, current, total)` | Long-running progress | P2 Coalesced |
 | `hub.Complete(topic, id, tid, success, hint)` | Operation finished | P0 Instant |
+| `hub.InvalidateForTenantWithHint(tid, topic, id, action, hint)` | Multi-tenant invalidation with hint | P0 Instant |
+| `hub.BatchDomainEvents(tid, []DomainEventSpec{...})` | Multiple resource changes in one frame | P0 Instant |
 | `hub.Publish(Event{...})` | Full control over all fields | Configurable |
 | `hub.FanOut(FanOutConfig{...})` | Bridge Redis/NATS pub/sub | Configurable |
 
@@ -114,6 +116,7 @@ Per-connection Writer (inside Fiber SendStreamWriter)
 | `signal` | `{signal: "refresh"}` | `Signal()` |
 | `progress` | `{resource_id, current, total, pct}` | `Progress()` |
 | `complete` | `{resource_id, status, ...hint}` | `Complete()` |
+| `batch` | `[{resource, action, resource_id, hint?}, ...]` | `BatchDomainEvents()` |
 | `server-shutdown` | `{}` | `Shutdown()` |
 
 ## Features Unique to fibersse
