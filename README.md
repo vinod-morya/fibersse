@@ -45,10 +45,13 @@ Most SSE libraries just push events. `fibersse` has **built-in patterns for repl
 | API | What It Does | Replaces |
 |-----|-------------|----------|
 | `hub.Invalidate()` | Signal clients to refetch a resource | `setInterval` polling |
+| `hub.InvalidateForTenant()` | Tenant-scoped invalidation (multi-tenant SaaS) | Tenant polling |
+| `hub.InvalidateForTenantWithHint()` | Tenant-scoped + data hints in one call | Polling + extra fetch |
 | `hub.DomainEvent()` | Structured event from any handler/worker | Manual event wiring |
+| `hub.BatchDomainEvents()` | Multiple resource changes in one SSE frame | Multiple polling loops |
 | `hub.Progress()` | Coalesced progress (5%→8% sends only 8%) | 2s progress polling |
 | `hub.Complete()` | Operation done signal (instant delivery) | Completion polling |
-| `hub.Signal()` | Generic "something changed" refresh | Dashboard polling |
+| `hub.Signal()` / `SignalForTenant()` | Generic "something changed" refresh | Dashboard polling |
 
 ### 3. Every Feature a SaaS Needs
 
@@ -425,6 +428,7 @@ Exposed metrics:
 - `fibersse_buffer_saturation_avg` — average send buffer usage
 - `fibersse_buffer_saturation_max` — worst-case buffer usage
 - `fibersse_connections_by_topic{topic="..."}` — per-topic breakdown
+- `fibersse_events_by_type_total{type="..."}` — per-event-type breakdown (invalidate, progress, signal, batch, etc.)
 
 ### Last-Event-ID Replay
 
@@ -484,6 +488,8 @@ fibersse.HubConfig{
     Logger:            slog.Default(),    // structured logging (nil = disabled)
     OnConnect:         nil,               // auth + topic selection callback
     OnDisconnect:      nil,               // cleanup callback
+    OnPause:           nil,               // called when client tab goes hidden
+    OnResume:          nil,               // called when client tab becomes visible
 }
 ```
 
@@ -544,8 +550,10 @@ fibersse/
 ├── replayer.go        Last-Event-ID replay (pluggable MemoryReplayer)
 ├── metrics.go         PrometheusHandler, MetricsHandler
 ├── stats.go           HubStats struct
-├── CLAUDE.md          Instructions for AI agents (Claude, Codex, Copilot)
-└── hub_test.go        29 tests covering all features
+├── CLAUDE.md            Instructions for AI agents (Claude, Codex, Copilot)
+├── hub_test.go          29 unit tests
+├── integration_test.go  11 integration tests (real Fiber HTTP server)
+└── benchmark_test.go    42 benchmarks (publish, coalesce, topic match, etc.)
 ```
 
 ## Integration with TanStack Query / SWR
@@ -648,7 +656,7 @@ This project follows [Semantic Versioning](https://semver.org/):
 - **v0.x.y** — Pre-1.0 development. API may change between minor versions.
 - **v1.0.0** — Stable API. Breaking changes only in major versions.
 
-Current: **v0.3.0**.
+Current: **v0.5.0**.
 
 ## Roadmap
 
