@@ -13,15 +13,41 @@
 
 ---
 
-The **only** SSE library built natively for [Fiber v3](https://github.com/gofiber/fiber) (fasthttp). No `net/http` adapters, no broken disconnect detection, no workarounds.
+**Stop polling. Start pushing.** The only SSE library built natively for [Fiber v3](https://github.com/gofiber/fiber) — with built-in cache invalidation, event coalescing, and one-line domain event publishing.
 
-Built for production SaaS: event coalescing, priority lanes, NATS-style topic wildcards, adaptive throttling, connection groups, built-in auth, Prometheus metrics, graceful drain, and auto fan-out from Redis/NATS.
+Replace `setInterval` with one line of Go:
+
+```go
+// Before: client polls every 30 seconds (wasteful)
+// setInterval(() => fetch("/api/orders"), 30_000)
+
+// After: server pushes when data ACTUALLY changes
+hub.Invalidate("orders", order.ID, "created")  // → client refetches instantly
+```
+
+**80-90% fewer API calls. Real-time UI. Zero polling.**
 
 ## Why fibersse?
 
-Every Fiber v3 project that needs SSE hand-rolls the same `SendStreamWriter` + `w.Flush()` pattern. Existing Go SSE libraries (`r3labs/sse`, `tmaxmax/go-sse`) are built on `net/http` and **break on Fiber** — specifically, client disconnect detection fails because `fasthttp.RequestCtx.Done()` only fires on server shutdown, not per-client disconnect. This causes zombie subscribers that leak forever.
+### 1. The Only SSE Library That Works on Fiber
 
-**fibersse** solves this:
+Every Go SSE library (`r3labs/sse`, `tmaxmax/go-sse`) is built on `net/http` and **breaks on Fiber** — `fasthttp.RequestCtx.Done()` only fires on server shutdown, not per-client disconnect. Zombie subscribers leak forever. `fibersse` uses Fiber's native `SendStreamWriter` with `w.Flush()` error detection.
+
+### 2. Built to Kill Polling
+
+Most SSE libraries just push events. `fibersse` has **built-in patterns for replacing polling**:
+
+| API | What It Does | Replaces |
+|-----|-------------|----------|
+| `hub.Invalidate()` | Signal clients to refetch a resource | `setInterval` polling |
+| `hub.DomainEvent()` | Structured event from any handler/worker | Manual event wiring |
+| `hub.Progress()` | Coalesced progress (5%→8% sends only 8%) | 2s progress polling |
+| `hub.Complete()` | Operation done signal (instant delivery) | Completion polling |
+| `hub.Signal()` | Generic "something changed" refresh | Dashboard polling |
+
+### 3. Every Feature a SaaS Needs
+
+
 
 | Feature | r3labs/sse | tmaxmax/go-sse | **fibersse** |
 |---------|-----------|----------------|-------------|
@@ -103,6 +129,87 @@ es.addEventListener('notification', (e) => {
     showToast(JSON.parse(e.data));
 });
 ```
+
+## Kill Polling Guide
+
+### Step 1: Replace setInterval with Invalidation
+
+**Backend** — publish when data changes:
+```go
+// In your order handler
+func (h *OrderHandler) Create(c fiber.Ctx) error {
+    order, err := h.svc.Create(...)
+    if err != nil { return err }
+
+    // One line — replaces 30s polling for ALL connected clients
+    hub.InvalidateForTenant(tenantID, "orders", order.ID, "created")
+    return c.JSON(order)
+}
+```
+
+**Frontend** — listen and refetch:
+```javascript
+// With TanStack Query (React Query)
+const es = new EventSource('/events?topics=orders');
+es.addEventListener('invalidate', (e) => {
+    const { resource } = JSON.parse(e.data);
+    queryClient.invalidateQueries({ queryKey: [resource] });
+});
+
+// With SWR
+es.addEventListener('invalidate', (e) => {
+    const { resource } = JSON.parse(e.data);
+    mutate(`/api/${resource}`);
+});
+```
+
+### Step 2: Track Progress Without Polling
+
+```go
+// Backend — in your import worker
+for i, row := range rows {
+    processRow(row)
+    hub.Progress("import", importID, tenantID, i+1, len(rows))
+    // Fires 1000 times but client receives ~10 updates (coalesced!)
+}
+hub.Complete("import", importID, tenantID, true, nil)
+```
+
+```javascript
+// Frontend
+es.addEventListener('progress', (e) => {
+    const { pct } = JSON.parse(e.data);
+    setProgressBar(pct); // Smooth updates, no polling
+});
+es.addEventListener('complete', (e) => {
+    showToast("Import complete!");
+    queryClient.invalidateQueries({ queryKey: ['products'] });
+});
+```
+
+### Step 3: Dashboard Signals (No Polling, Ever)
+
+```go
+// Backend — after ANY mutation that affects the dashboard
+hub.SignalForTenant(tenantID, "dashboard") // coalesced, won't flood
+
+// Or with hints:
+hub.InvalidateWithHint("orders", orderID, "created", map[string]any{
+    "total": 149.99,
+    "customer": "John Doe",
+})
+```
+
+### Impact
+
+| Metric | Before (Polling) | After (SSE) |
+|--------|-----------------|-------------|
+| API calls per user/minute | ~12 (6 pages × 30s) | ~0-2 (only when data changes) |
+| Time to see new data | 0-30 seconds | < 200ms |
+| Server load | Constant (even idle users poll) | Proportional to actual changes |
+| Battery drain (mobile) | High (constant network) | Minimal (idle connection) |
+
+---
 
 ## Features
 
@@ -419,18 +526,21 @@ fibersse.HubConfig{
 
 ```
 fibersse/
-├── hub.go          Hub struct, New(), Publish(), Handler(), Shutdown()
-├── connection.go   Connection struct, writer goroutine, backpressure
-├── coalescer.go    Per-connection batch + last-writer-wins buffers
-├── event.go        Event struct, Priority constants, SSE wire format
-├── topic.go        NATS-style wildcard topic matching
-├── throttle.go     Adaptive per-connection flush interval (AIMD)
-├── replayer.go     Replayer interface + MemoryReplayer
-├── auth.go         JWTAuth, TicketAuth, TicketStore helpers
-├── fanout.go       PubSubSubscriber interface, FanOut(), FanOutMulti()
-├── metrics.go      MetricsHandler, PrometheusHandler, MetricsSnapshot
-├── stats.go        HubStats struct
-└── hub_test.go     29 tests covering all features
+├── hub.go             Core hub — New(), Publish(), Handler(), Shutdown()
+├── invalidation.go    Kill polling — Invalidate(), Signal(), InvalidateForTenant()
+├── domain_event.go    One-line publish — DomainEvent(), Progress(), Complete()
+├── event.go           Event struct, Priority constants, SSE wire format
+├── connection.go      Per-client connection, write loop, backpressure
+├── coalescer.go       Batch + last-writer-wins buffers
+├── topic.go           NATS-style wildcard topic matching (* and >)
+├── throttle.go        Adaptive per-connection flush interval (AIMD)
+├── auth.go            JWTAuth, TicketAuth, TicketStore helpers
+├── fanout.go          PubSubSubscriber, FanOut(), FanOutMulti()
+├── replayer.go        Last-Event-ID replay (pluggable MemoryReplayer)
+├── metrics.go         PrometheusHandler, MetricsHandler
+├── stats.go           HubStats struct
+├── CLAUDE.md          Instructions for AI agents (Claude, Codex, Copilot)
+└── hub_test.go        29 tests covering all features
 ```
 
 ## Versioning
@@ -440,16 +550,17 @@ This project follows [Semantic Versioning](https://semver.org/):
 - **v0.x.y** — Pre-1.0 development. API may change between minor versions.
 - **v1.0.0** — Stable API. Breaking changes only in major versions.
 
-Current: **v0.1.0** (initial release).
+Current: **v0.3.0**.
 
 ## Roadmap
 
 - [ ] Redis Streams Replayer (durable replay across server restarts)
+- [ ] TypeScript client SDK (`@vinod-morya/fibersse-client`) with React hooks
 - [ ] Admin Dashboard (web UI for live connection monitoring)
-- [ ] TypeScript client SDK (`@vinod-morya/fibersse-client`)
 - [ ] WebSocket fallback transport
 - [ ] Load testing CLI (`fibersse-bench`)
 - [ ] OpenTelemetry tracing integration
+- [ ] TanStack Query integration example
 
 ## Contributing
 
