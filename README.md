@@ -4,6 +4,8 @@
     Production-grade Server-Sent Events (SSE) for <a href="https://github.com/gofiber/fiber">Fiber v3</a>
   </p>
   <p align="center">
+    <a href="https://github.com/vinod-morya/fibersse/actions/workflows/ci.yml"><img src="https://github.com/vinod-morya/fibersse/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+    <a href="https://codecov.io/gh/vinod-morya/fibersse"><img src="https://codecov.io/gh/vinod-morya/fibersse/branch/main/graph/badge.svg" alt="Coverage"></a>
     <a href="https://pkg.go.dev/github.com/vinod-morya/fibersse"><img src="https://pkg.go.dev/badge/github.com/vinod-morya/fibersse.svg" alt="Go Reference"></a>
     <a href="https://goreportcard.com/report/github.com/vinod-morya/fibersse"><img src="https://goreportcard.com/badge/github.com/vinod-morya/fibersse" alt="Go Report Card"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
@@ -73,6 +75,33 @@ Most SSE libraries just push events. `fibersse` has **built-in patterns for repl
 | Event TTL | No | No | **Yes** |
 | Last-Event-ID replay | Yes | Yes | **Yes** (pluggable) |
 | Fan-out middleware | No | No | **Yes** (Redis/NATS bridge) |
+
+## fibersse vs Fiber SSE Recipe
+
+Fiber's [official SSE recipe](https://github.com/gofiber/recipes/tree/master/sse) is ~50 lines of raw `SendStreamWriter` code. It's a great starting point, but it's a **recipe** (copy-paste example), not a **library**. Here's what fibersse adds:
+
+| Feature | Fiber Recipe | fibersse |
+|---------|:---:|:---:|
+| Hub pattern (managed connections) | ❌ | ✅ |
+| Topic routing | ❌ | ✅ |
+| NATS-style wildcard topics (`*`, `>`) | ❌ | ✅ |
+| Event coalescing (P0/P1/P2 priorities) | ❌ | ✅ |
+| Authentication (JWT + ticket) | ❌ | ✅ |
+| Last-Event-ID replay | ❌ | ✅ |
+| Heartbeat management | ❌ | ✅ (adaptive) |
+| Connection tracking + groups | ❌ | ✅ |
+| Prometheus metrics | ❌ | ✅ |
+| Graceful Kubernetes-style drain | ❌ | ✅ |
+| Cache invalidation helpers | ❌ | ✅ |
+| Multi-tenant support | ❌ | ✅ |
+| Domain event publishing | ❌ | ✅ |
+| Progress tracking (coalesced) | ❌ | ✅ |
+| Auto fan-out from Redis/NATS | ❌ | ✅ |
+| Visibility hints (paused tabs) | ❌ | ✅ |
+| Adaptive per-connection throttling | ❌ | ✅ |
+| React SDK (`fibersse-react`) | ❌ | ✅ |
+
+The recipe is perfect if you need to push a single event to a single client. fibersse is for production apps that need topic routing, multi-tenancy, auth, coalescing, and monitoring.
 
 ## Install
 
@@ -475,6 +504,32 @@ Each connection has a bounded send buffer (default: 256 events). If a client can
 - Monitor via `hub.Metrics()` to identify slow clients
 - The client's EventSource auto-reconnects and gets current state
 
+## Benchmarks
+
+Run on Apple M4 Max, Go 1.25, `-benchmem`:
+
+| Operation | ns/op | B/op | allocs/op |
+|-----------|------:|-----:|----------:|
+| Publish (1 conn) | 477 | 72 | 2 |
+| Publish (1,000 conns) | 81,976 | 101,572 | 22 |
+| Coalesce same key | 21 | 0 | 0 |
+| Topic match (exact) | 8 | 0 | 0 |
+| Topic match (wildcard `*`) | 51 | 64 | 2 |
+| Topic match (wildcard `>`) | 60 | 96 | 2 |
+| Marshal event (string) | 3 | 0 | 0 |
+| Marshal event (struct) | 89 | 96 | 2 |
+| Connection send | 14 | 0 | 0 |
+| Backpressure drop | 2 | 0 | 0 |
+| Throttle decision | 19 | 0 | 0 |
+| Group match (single key) | 27 | 0 | 0 |
+| Replayer store | 140 | 687 | 4 |
+
+**Key takeaway:** Publishing to 1,000 connections takes 82μs. Zero-alloc on all hot paths (topic match, send, backpressure, throttle).
+
+```bash
+go test -bench=. -benchmem ./...
+```
+
 ## Configuration
 
 ```go
@@ -668,9 +723,19 @@ Current: **v0.5.0**.
 - [ ] OpenTelemetry tracing integration
 - [ ] TanStack Query integration example
 
+## Examples
+
+Runnable examples in the [`examples/`](examples/) directory:
+
+| Example | What it demonstrates | Run |
+|---------|---------------------|-----|
+| [basic](examples/basic/) | Minimal hub setup, periodic publisher, browser client | `cd examples/basic && go run main.go` |
+| [chat](examples/chat/) | Multi-room chat with topic wildcards and metadata | `cd examples/chat && go run main.go` |
+| [polling-replacement](examples/polling-replacement/) | Side-by-side polling vs SSE comparison | `cd examples/polling-replacement && go run main.go` |
+
 ## Contributing
 
-Contributions are welcome! Please open an issue first to discuss what you'd like to change.
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for development workflow, code style, and PR process.
 
 ## License
 
