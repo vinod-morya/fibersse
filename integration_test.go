@@ -180,7 +180,7 @@ func TestIntegration_Connect(t *testing.T) {
 
 	baseURL, cleanup := testServer(t, app)
 	defer cleanup()
-	defer hub.Shutdown(nil)
+	defer hub.Shutdown(context.TODO())
 
 	events, cancel := sseClient(t, baseURL+"/events")
 	defer cancel()
@@ -216,7 +216,7 @@ func TestIntegration_PublishReceive(t *testing.T) {
 
 	baseURL, cleanup := testServer(t, app)
 	defer cleanup()
-	defer hub.Shutdown(nil)
+	defer hub.Shutdown(context.TODO())
 
 	events, cancel := sseClient(t, baseURL+"/events")
 	defer cancel()
@@ -265,7 +265,7 @@ func TestIntegration_TopicFiltering(t *testing.T) {
 
 	baseURL, cleanup := testServer(t, app)
 	defer cleanup()
-	defer hub.Shutdown(nil)
+	defer hub.Shutdown(context.TODO())
 
 	// Client subscribed to topic "a"
 	eventsA, cancelA := sseClient(t, baseURL+"/events?topic=a")
@@ -332,7 +332,7 @@ func TestIntegration_Coalescing(t *testing.T) {
 
 	baseURL, cleanup := testServer(t, app)
 	defer cleanup()
-	defer hub.Shutdown(nil)
+	defer hub.Shutdown(context.TODO())
 
 	events, cancel := sseClient(t, baseURL+"/events")
 	defer cancel()
@@ -399,7 +399,7 @@ func TestIntegration_GroupFiltering(t *testing.T) {
 
 	baseURL, cleanup := testServer(t, app)
 	defer cleanup()
-	defer hub.Shutdown(nil)
+	defer hub.Shutdown(context.TODO())
 
 	// Tenant A client
 	eventsA, cancelA := sseClient(t, baseURL+"/events?tenant=t_A")
@@ -469,7 +469,7 @@ func TestIntegration_Invalidate(t *testing.T) {
 
 	baseURL, cleanup := testServer(t, app)
 	defer cleanup()
-	defer hub.Shutdown(nil)
+	defer hub.Shutdown(context.TODO())
 
 	events, cancel := sseClient(t, baseURL+"/events")
 	defer cancel()
@@ -520,7 +520,7 @@ func TestIntegration_BatchDomainEvents(t *testing.T) {
 
 	baseURL, cleanup := testServer(t, app)
 	defer cleanup()
-	defer hub.Shutdown(nil)
+	defer hub.Shutdown(context.TODO())
 
 	events, cancel := sseClient(t, baseURL+"/events")
 	defer cancel()
@@ -613,7 +613,7 @@ func TestIntegration_OnConnectReject(t *testing.T) {
 
 	baseURL, cleanup := testServer(t, app)
 	defer cleanup()
-	defer hub.Shutdown(nil)
+	defer hub.Shutdown(context.TODO())
 
 	resp, err := http.Get(baseURL + "/events")
 	if err != nil {
@@ -641,7 +641,7 @@ func TestIntegration_NoTopics_Returns400(t *testing.T) {
 
 	baseURL, cleanup := testServer(t, app)
 	defer cleanup()
-	defer hub.Shutdown(nil)
+	defer hub.Shutdown(context.TODO())
 
 	resp, err := http.Get(baseURL + "/events")
 	if err != nil {
@@ -675,7 +675,7 @@ func TestIntegration_MultipleClients(t *testing.T) {
 
 	baseURL, cleanup := testServer(t, app)
 	defer cleanup()
-	defer hub.Shutdown(nil)
+	defer hub.Shutdown(context.TODO())
 
 	const numClients = 5
 	channels := make([]<-chan sseEvent, numClients)
@@ -740,7 +740,7 @@ func TestIntegration_StatsAfterConnect(t *testing.T) {
 
 	baseURL, cleanup := testServer(t, app)
 	defer cleanup()
-	defer hub.Shutdown(nil)
+	defer hub.Shutdown(context.TODO())
 
 	events, cancel := sseClient(t, baseURL+"/events")
 	defer cancel()

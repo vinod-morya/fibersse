@@ -14,8 +14,8 @@ type MetricsSnapshot struct {
 	Timestamp string `json:"timestamp"`
 
 	// Connections
-	ActiveConnections int            `json:"active_connections"`
-	PausedConnections int            `json:"paused_connections"`
+	ActiveConnections  int            `json:"active_connections"`
+	PausedConnections  int            `json:"paused_connections"`
 	ConnectionsByTopic map[string]int `json:"connections_by_topic"`
 
 	// Events
@@ -23,7 +23,7 @@ type MetricsSnapshot struct {
 	EventsDropped   int64 `json:"events_dropped"`
 
 	// Buffers
-	TotalPendingEvents int `json:"total_pending_events"`
+	TotalPendingEvents  int     `json:"total_pending_events"`
 	AvgBufferSaturation float64 `json:"avg_buffer_saturation"`
 	MaxBufferSaturation float64 `json:"max_buffer_saturation"`
 
@@ -128,8 +128,8 @@ func (h *Hub) MetricsHandler() fiber.Handler {
 	}
 }
 
-// PrometheusMetrics returns Prometheus-formatted metrics text.
-// Mount on your /metrics endpoint or merge with existing metrics.
+// PrometheusHandler returns a Fiber handler that serves Prometheus-formatted
+// metrics text. Mount on your /metrics endpoint or merge with existing metrics.
 //
 //	app.Get("/metrics/sse", hub.PrometheusHandler())
 func (h *Hub) PrometheusHandler() fiber.Handler {

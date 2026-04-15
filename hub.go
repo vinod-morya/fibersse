@@ -125,7 +125,7 @@ type Hub struct {
 
 	metrics   hubMetrics
 	throttler *adaptiveThrottler
-	draining  atomic.Bool // true during graceful drain
+	draining  atomic.Bool   // true during graceful drain
 	stopped   chan struct{} // closed when run loop exits
 }
 
@@ -149,11 +149,11 @@ func New(cfg ...HubConfig) *Hub {
 	c.defaults()
 
 	h := &Hub{
-		cfg:         c,
-		register:    make(chan *Connection, 64),
-		unregister:  make(chan *Connection, 64),
-		events:      make(chan Event, 1024),
-		shutdown:    make(chan struct{}),
+		cfg:           c,
+		register:      make(chan *Connection, 64),
+		unregister:    make(chan *Connection, 64),
+		events:        make(chan Event, 1024),
+		shutdown:      make(chan struct{}),
 		connections:   make(map[string]*Connection),
 		topicIndex:    make(map[string]map[string]struct{}),
 		wildcardConns: make(map[string]struct{}),
@@ -297,78 +297,100 @@ func (h *Hub) Handler() fiber.Handler {
 				}
 			}()
 
-			// Send retry hint
-			if err := writeRetry(w, h.cfg.RetryMS); err != nil {
+			if err := h.initStream(w, conn, lastEventID); err != nil {
 				return
 			}
 
-			// Replay missed events if client sent Last-Event-ID
-			if lastEventID != "" && h.cfg.Replayer != nil {
-				events, err := h.cfg.Replayer.Replay(lastEventID, conn.Topics)
-				if err == nil && len(events) > 0 {
-					for _, me := range events {
-						if _, err := me.WriteTo(w); err != nil {
-							return
-						}
-					}
-					if err := w.Flush(); err != nil {
-						return
-					}
-				}
-			}
-
-			// Send connected event
-			connected := MarshaledEvent{
-				ID:    nextEventID(),
-				Type:  "connected",
-				Data:  fmt.Sprintf(`{"connection_id":"%s","topics":%s}`, conn.ID, topicsJSON(conn.Topics)),
-				Retry: -1,
-			}
-			if _, err := connected.WriteTo(w); err != nil {
-				return
-			}
-			if err := w.Flush(); err != nil {
-				return
-			}
-
-			// Lifetime timer — close connection after MaxLifetime
-			if h.cfg.MaxLifetime > 0 {
-				go func() {
-					timer := time.NewTimer(h.cfg.MaxLifetime)
-					defer timer.Stop()
-					select {
-					case <-timer.C:
-						conn.Close()
-					case <-conn.done:
-					}
-				}()
-			}
-
-			// Shutdown watcher — send server-shutdown event then close
-			go func() {
-				select {
-				case <-h.shutdown:
-					if !conn.IsClosed() {
-						shutdownEvt := MarshaledEvent{
-							ID:    nextEventID(),
-							Type:  "server-shutdown",
-							Data:  "{}",
-							Retry: -1,
-						}
-						conn.trySend(shutdownEvt)
-						// Give the writer a moment to flush before closing
-						time.Sleep(200 * time.Millisecond)
-					}
-					conn.Close()
-				case <-conn.done:
-					// Connection closed normally — nothing to do
-				}
-			}()
-
-			// Delegate to the connection's write loop
+			h.watchLifetime(conn)
+			h.watchShutdown(conn)
 			conn.writeLoop(w)
 		})
 	}
+}
+
+// initStream writes the initial SSE preamble: retry hint, replayed events,
+// and the "connected" event.
+func (h *Hub) initStream(w *bufio.Writer, conn *Connection, lastEventID string) error {
+	if err := writeRetry(w, h.cfg.RetryMS); err != nil {
+		return err
+	}
+
+	if err := h.replayEvents(w, conn, lastEventID); err != nil {
+		return err
+	}
+
+	return sendConnectedEvent(w, conn)
+}
+
+// replayEvents replays missed events if the client sent a Last-Event-ID.
+func (h *Hub) replayEvents(w *bufio.Writer, conn *Connection, lastEventID string) error {
+	if lastEventID == "" || h.cfg.Replayer == nil {
+		return nil
+	}
+	events, err := h.cfg.Replayer.Replay(lastEventID, conn.Topics)
+	if err != nil || len(events) == 0 {
+		return nil
+	}
+	for _, me := range events {
+		if _, werr := me.WriteTo(w); werr != nil {
+			return werr
+		}
+	}
+	return w.Flush()
+}
+
+// sendConnectedEvent writes the "connected" event with the connection ID
+// and subscribed topics.
+func sendConnectedEvent(w *bufio.Writer, conn *Connection) error {
+	connected := MarshaledEvent{
+		ID:    nextEventID(),
+		Type:  "connected",
+		Data:  fmt.Sprintf(`{"connection_id":"%s","topics":%s}`, conn.ID, topicsJSON(conn.Topics)),
+		Retry: -1,
+	}
+	if _, err := connected.WriteTo(w); err != nil {
+		return err
+	}
+	return w.Flush()
+}
+
+// watchLifetime starts a goroutine that closes the connection after
+// MaxLifetime has elapsed.
+func (h *Hub) watchLifetime(conn *Connection) {
+	if h.cfg.MaxLifetime <= 0 {
+		return
+	}
+	go func() {
+		timer := time.NewTimer(h.cfg.MaxLifetime)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			conn.Close()
+		case <-conn.done:
+		}
+	}()
+}
+
+// watchShutdown starts a goroutine that sends a "server-shutdown" event
+// and closes the connection when the hub begins draining.
+func (h *Hub) watchShutdown(conn *Connection) {
+	go func() {
+		select {
+		case <-h.shutdown:
+			if !conn.IsClosed() {
+				shutdownEvt := MarshaledEvent{
+					ID:    nextEventID(),
+					Type:  "server-shutdown",
+					Data:  "{}",
+					Retry: -1,
+				}
+				conn.trySend(shutdownEvt)
+				time.Sleep(200 * time.Millisecond)
+			}
+			conn.Close()
+		case <-conn.done:
+		}
+	}()
 }
 
 // run is the hub's main event loop. It processes registrations,
@@ -504,7 +526,25 @@ func (h *Hub) routeEvent(event Event) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
-	// Collect unique connection IDs matching the event's topics
+	seen := h.matchConnections(event)
+
+	// Deliver to matched connections
+	for connID := range seen {
+		conn, ok := h.connections[connID]
+		if !ok || conn.IsClosed() {
+			continue
+		}
+		if conn.paused.Load() && event.Priority != PriorityInstant {
+			continue
+		}
+		h.deliverToConn(conn, event, me)
+	}
+}
+
+// matchConnections collects all connection IDs that should receive the event
+// based on exact topic index, wildcard patterns, and group metadata.
+// Must be called while holding h.mu.RLock().
+func (h *Hub) matchConnections(event Event) map[string]struct{} {
 	seen := make(map[string]struct{})
 
 	// 1. Exact topic index lookup (O(1) per topic)
@@ -517,6 +557,17 @@ func (h *Hub) routeEvent(event Event) {
 	}
 
 	// 2. Wildcard connections — check each against event topics
+	h.matchWildcardConns(event, seen)
+
+	// 3. Group-based matching — match by metadata key-value pairs
+	h.matchGroupConns(event, seen)
+
+	return seen
+}
+
+// matchWildcardConns adds wildcard-subscribed connections that match the event topics.
+// Must be called while holding h.mu.RLock().
+func (h *Hub) matchWildcardConns(event Event, seen map[string]struct{}) {
 	for connID := range h.wildcardConns {
 		if _, already := seen[connID]; already {
 			continue
@@ -532,32 +583,21 @@ func (h *Hub) routeEvent(event Event) {
 			}
 		}
 	}
+}
 
-	// 3. Group-based matching — match by metadata key-value pairs
-	if len(event.Group) > 0 {
-		for connID, conn := range h.connections {
-			if _, already := seen[connID]; already {
-				continue
-			}
-			if connMatchesGroup(conn, event.Group) {
-				seen[connID] = struct{}{}
-			}
-		}
+// matchGroupConns adds connections that match the event's group metadata.
+// Must be called while holding h.mu.RLock().
+func (h *Hub) matchGroupConns(event Event, seen map[string]struct{}) {
+	if len(event.Group) == 0 {
+		return
 	}
-
-	// Deliver to matched connections
-	for connID := range seen {
-		conn, ok := h.connections[connID]
-		if !ok || conn.IsClosed() {
+	for connID, conn := range h.connections {
+		if _, already := seen[connID]; already {
 			continue
 		}
-
-		// Skip hidden (paused) connections for non-instant events
-		if conn.paused.Load() && event.Priority != PriorityInstant {
-			continue
+		if connMatchesGroup(conn, event.Group) {
+			seen[connID] = struct{}{}
 		}
-
-		h.deliverToConn(conn, event, me)
 	}
 }
 

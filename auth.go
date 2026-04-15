@@ -113,6 +113,7 @@ func NewMemoryTicketStore() *MemoryTicketStore {
 	return s
 }
 
+// Set stores a ticket with the given value and TTL.
 func (s *MemoryTicketStore) Set(ticket string, value string, ttl time.Duration) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -120,6 +121,8 @@ func (s *MemoryTicketStore) Set(ticket string, value string, ttl time.Duration) 
 	return nil
 }
 
+// GetDel atomically retrieves and deletes a ticket (one-time use).
+// Returns empty string and nil error if not found or expired.
 func (s *MemoryTicketStore) GetDel(ticket string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

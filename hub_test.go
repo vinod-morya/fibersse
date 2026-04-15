@@ -2,6 +2,7 @@ package fibersse
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -299,7 +300,7 @@ func TestHubStats(t *testing.T) {
 		FlushInterval:     100 * time.Millisecond,
 		HeartbeatInterval: 10 * time.Second,
 	})
-	defer hub.Shutdown(nil)
+	defer hub.Shutdown(context.TODO())
 
 	stats := hub.Stats()
 	if stats.ActiveConnections != 0 {
@@ -547,7 +548,7 @@ func TestMetricsSnapshot(t *testing.T) {
 		FlushInterval:     100 * time.Millisecond,
 		HeartbeatInterval: 10 * time.Second,
 	})
-	defer hub.Shutdown(nil)
+	defer hub.Shutdown(context.TODO())
 
 	snap := hub.Metrics(false)
 	if snap.ActiveConnections != 0 {
@@ -572,7 +573,7 @@ func TestGracefulDrain(t *testing.T) {
 	}
 
 	// Shutdown triggers drain
-	hub.Shutdown(nil)
+	hub.Shutdown(context.TODO())
 
 	if !hub.draining.Load() {
 		t.Error("should be draining after shutdown")

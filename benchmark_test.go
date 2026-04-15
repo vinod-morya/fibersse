@@ -2,6 +2,7 @@ package fibersse
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -19,7 +20,7 @@ func BenchmarkPublish(b *testing.B) {
 		FlushInterval:     time.Minute, // effectively disabled
 		HeartbeatInterval: time.Minute,
 	})
-	defer hub.Shutdown(nil)
+	defer hub.Shutdown(context.TODO())
 
 	evt := Event{
 		Type:     "notification",
@@ -42,7 +43,7 @@ func BenchmarkPublish_1000Conns(b *testing.B) {
 		HeartbeatInterval: time.Minute,
 		SendBufferSize:    1024,
 	})
-	defer hub.Shutdown(nil)
+	defer hub.Shutdown(context.TODO())
 
 	// Register 1000 fake connections
 	for i := 0; i < 1000; i++ {

@@ -77,49 +77,14 @@ func (h *Hub) FanOut(cfg FanOutConfig) context.CancelFunc {
 			}
 
 			err := cfg.Subscriber.Subscribe(ctx, cfg.Channel, func(payload string) {
-				var event Event
-
-				if cfg.Transform != nil {
-					transformed := cfg.Transform(payload)
-					if transformed == nil {
-						return // skip this message
-					}
-					event = *transformed
-				} else {
-					event = Event{
-						Type: cfg.EventType,
-						Data: payload,
-					}
+				event := h.buildFanOutEvent(cfg, topic, payload)
+				if event != nil {
+					h.Publish(*event)
 				}
-
-				// Apply defaults from config
-				if len(event.Topics) == 0 {
-					event.Topics = []string{topic}
-				}
-				if event.Type == "" {
-					event.Type = cfg.EventType
-				}
-				if event.Priority == 0 && cfg.Priority != 0 {
-					event.Priority = cfg.Priority
-				}
-				if event.CoalesceKey == "" && cfg.CoalesceKey != "" {
-					event.CoalesceKey = cfg.CoalesceKey
-				}
-				if event.TTL == 0 && cfg.TTL > 0 {
-					event.TTL = cfg.TTL
-				}
-
-				h.Publish(event)
 			})
 
 			if err != nil && ctx.Err() == nil {
-				// Subscriber error — wait before retrying
-				if h.cfg.Logger != nil {
-					h.cfg.Logger.Warn("fibersse: fan-out subscriber error, retrying",
-						"channel", cfg.Channel,
-						"error", err,
-					)
-				}
+				h.logFanOutError(cfg.Channel, err)
 				select {
 				case <-time.After(3 * time.Second):
 				case <-ctx.Done():
@@ -130,6 +95,54 @@ func (h *Hub) FanOut(cfg FanOutConfig) context.CancelFunc {
 	}()
 
 	return cancel
+}
+
+// buildFanOutEvent creates an Event from a raw pub/sub payload using the
+// FanOutConfig. Returns nil if the transform function filters the message.
+func (h *Hub) buildFanOutEvent(cfg FanOutConfig, topic, payload string) *Event {
+	var event Event
+
+	if cfg.Transform != nil {
+		transformed := cfg.Transform(payload)
+		if transformed == nil {
+			return nil
+		}
+		event = *transformed
+	} else {
+		event = Event{
+			Type: cfg.EventType,
+			Data: payload,
+		}
+	}
+
+	// Apply defaults from config
+	if len(event.Topics) == 0 {
+		event.Topics = []string{topic}
+	}
+	if event.Type == "" {
+		event.Type = cfg.EventType
+	}
+	if event.Priority == 0 && cfg.Priority != 0 {
+		event.Priority = cfg.Priority
+	}
+	if event.CoalesceKey == "" && cfg.CoalesceKey != "" {
+		event.CoalesceKey = cfg.CoalesceKey
+	}
+	if event.TTL == 0 && cfg.TTL > 0 {
+		event.TTL = cfg.TTL
+	}
+
+	return &event
+}
+
+// logFanOutError logs a fan-out subscriber error if a logger is configured.
+func (h *Hub) logFanOutError(channel string, err error) {
+	if h.cfg.Logger != nil {
+		h.cfg.Logger.Warn("fibersse: fan-out subscriber error, retrying",
+			"channel", channel,
+			"error", err,
+		)
+	}
 }
 
 // FanOutMulti starts multiple fan-out goroutines at once.

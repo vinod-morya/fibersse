@@ -1,0 +1,18 @@
+# Coverage output
+coverage.out
+coverage.html
+c.out
+
+# Go build artifacts
+*.test
+*.prof
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.idea/
+.vscode/
+*.swp
+*.swo
