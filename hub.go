@@ -82,6 +82,31 @@ type HubConfig struct {
 
 	// OnResume is called when a connection is resumed (browser tab visible).
 	OnResume func(conn *Connection)
+
+	// DropPolicy controls how the hub behaves under backpressure.
+	// If unset, the zero-value defaults are applied (see DropPolicy.defaults()).
+	DropPolicy DropPolicy
+}
+
+// DropPolicy configures backpressure and slow-client eviction behaviour.
+type DropPolicy struct {
+	// PrioritizedDrop — when dropping under backpressure, prefer dropping P2
+	// (coalesced) before P1 (batched) before P0 (instant). Default: true.
+	PrioritizedDrop bool
+
+	// SlowClientDropThreshold — evict a connection after this many consecutive
+	// drops. Evicted clients reconnect fresh (Last-Event-ID replay still works).
+	// 0 disables eviction. Default: 50.
+	SlowClientDropThreshold int
+}
+
+func (dp *DropPolicy) defaults() {
+	if !dp.PrioritizedDrop {
+		dp.PrioritizedDrop = true
+	}
+	if dp.SlowClientDropThreshold == 0 {
+		dp.SlowClientDropThreshold = 50
+	}
 }
 
 func (cfg *HubConfig) defaults() {
@@ -100,6 +125,7 @@ func (cfg *HubConfig) defaults() {
 	if cfg.RetryMS <= 0 {
 		cfg.RetryMS = 3000
 	}
+	cfg.DropPolicy.defaults()
 }
 
 // Hub is the central SSE event broker. It manages client connections,
@@ -280,12 +306,13 @@ func (h *Hub) Stats() HubStats {
 	}
 
 	return HubStats{
-		ActiveConnections:  len(h.connections),
-		TotalTopics:        len(h.topicIndex),
-		EventsPublished:    h.metrics.eventsPublished.Load(),
-		EventsDropped:      h.metrics.eventsDropped.Load(),
-		ConnectionsByTopic: byTopic,
-		EventsByType:       h.metrics.snapshotEventsByType(),
+		ActiveConnections:   len(h.connections),
+		TotalTopics:         len(h.topicIndex),
+		EventsPublished:     h.metrics.eventsPublished.Load(),
+		EventsDropped:       h.metrics.eventsDropped.Load(),
+		SlowClientEvictions: h.metrics.slowClientEvictions.Load(),
+		ConnectionsByTopic:  byTopic,
+		EventsByType:        h.metrics.snapshotEventsByType(),
 	}
 }
 
@@ -648,20 +675,54 @@ func (h *Hub) matchGroupConns(event Event, seen map[string]struct{}) {
 }
 
 // deliverToConn routes an event to a connection based on priority.
+// Under backpressure, P2/P1 are dropped first (PrioritizedDrop).
+// After SlowClientDropThreshold consecutive drops, the connection is evicted.
 func (h *Hub) deliverToConn(conn *Connection, event Event, me MarshaledEvent) {
 	switch event.Priority {
 	case PriorityInstant:
 		if !conn.trySend(me) {
 			h.metrics.eventsDropped.Add(1)
+			h.checkSlowClient(conn)
 		}
 	case PriorityBatched:
+		// PrioritizedDrop: skip buffering for full connections so P0 events can land.
+		if h.cfg.DropPolicy.PrioritizedDrop && len(conn.send) >= cap(conn.send) {
+			h.metrics.eventsDropped.Add(1)
+			h.checkSlowClient(conn)
+			return
+		}
 		conn.coalescer.addBatched(me)
 	case PriorityCoalesced:
+		// PrioritizedDrop: coalesced events are cheapest to drop.
+		if h.cfg.DropPolicy.PrioritizedDrop && len(conn.send) >= cap(conn.send) {
+			h.metrics.eventsDropped.Add(1)
+			h.checkSlowClient(conn)
+			return
+		}
 		key := event.CoalesceKey
 		if key == "" {
 			key = event.Type
 		}
 		conn.coalescer.addCoalesced(key, me)
+	}
+}
+
+// checkSlowClient evicts a connection once it has hit the consecutive-drop threshold.
+func (h *Hub) checkSlowClient(conn *Connection) {
+	threshold := int32(h.cfg.DropPolicy.SlowClientDropThreshold)
+	if threshold <= 0 {
+		return
+	}
+	drops := conn.consecutiveDrops.Add(1)
+	if drops >= threshold {
+		if h.cfg.Logger != nil {
+			h.cfg.Logger.Warn("fibersse: evicting slow client",
+				"conn_id", conn.ID,
+				"consecutive_drops", drops,
+			)
+		}
+		h.metrics.slowClientEvictions.Add(1)
+		conn.Close()
 	}
 }
 

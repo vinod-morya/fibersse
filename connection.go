@@ -49,6 +49,11 @@ type Connection struct {
 
 	// coalescer holds per-connection buffering state for P1/P2 events.
 	coalescer *coalescer
+
+	// consecutiveDrops counts unbroken backpressure drops. Reset to 0 on any
+	// successful send. When it reaches DropPolicy.SlowClientDropThreshold the
+	// connection is evicted so the client reconnects fresh.
+	consecutiveDrops atomic.Int32
 }
 
 // newConnection creates a Connection with the given buffer size.
@@ -89,6 +94,7 @@ func (c *Connection) IsClosed() bool {
 func (c *Connection) trySend(me MarshaledEvent) bool {
 	select {
 	case c.send <- me:
+		c.consecutiveDrops.Store(0)
 		return true
 	default:
 		c.MessagesDropped.Add(1)

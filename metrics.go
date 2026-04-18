@@ -19,8 +19,9 @@ type MetricsSnapshot struct {
 	ConnectionsByTopic map[string]int `json:"connections_by_topic"`
 
 	// Events
-	EventsPublished int64 `json:"events_published"`
-	EventsDropped   int64 `json:"events_dropped"`
+	EventsPublished     int64 `json:"events_published"`
+	EventsDropped       int64 `json:"events_dropped"`
+	SlowClientEvictions int64 `json:"slow_client_evictions"`
 
 	// Buffers
 	TotalPendingEvents  int     `json:"total_pending_events"`
@@ -59,8 +60,9 @@ func (h *Hub) Metrics(includeConnections bool) MetricsSnapshot {
 		Timestamp:          now.Format(time.RFC3339),
 		ActiveConnections:  len(h.connections),
 		ConnectionsByTopic: make(map[string]int, len(h.topicIndex)),
-		EventsPublished:    h.metrics.eventsPublished.Load(),
-		EventsDropped:      h.metrics.eventsDropped.Load(),
+		EventsPublished:     h.metrics.eventsPublished.Load(),
+		EventsDropped:       h.metrics.eventsDropped.Load(),
+		SlowClientEvictions: h.metrics.slowClientEvictions.Load(),
 	}
 
 	for topic, conns := range h.topicIndex {
@@ -142,6 +144,7 @@ func (h *Hub) PrometheusHandler() fiber.Handler {
 		lines = appendProm(lines, "fibersse_connections_paused", "", float64(snap.PausedConnections))
 		lines = appendProm(lines, "fibersse_events_published_total", "", float64(snap.EventsPublished))
 		lines = appendProm(lines, "fibersse_events_dropped_total", "", float64(snap.EventsDropped))
+		lines = appendProm(lines, "fibersse_slow_client_evictions_total", "", float64(snap.SlowClientEvictions))
 		lines = appendProm(lines, "fibersse_pending_events", "", float64(snap.TotalPendingEvents))
 		lines = appendProm(lines, "fibersse_buffer_saturation_avg", "", snap.AvgBufferSaturation)
 		lines = appendProm(lines, "fibersse_buffer_saturation_max", "", snap.MaxBufferSaturation)

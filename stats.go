@@ -25,12 +25,17 @@ type HubStats struct {
 	// EventsByType maps each SSE event type to its lifetime count.
 	// Example: {"invalidate": 1234, "progress": 567, "signal": 89, "batch": 12}
 	EventsByType map[string]int64 `json:"events_by_type"`
+
+	// SlowClientEvictions is the count of connections force-closed due to
+	// exceeding DropPolicy.SlowClientDropThreshold consecutive drops.
+	SlowClientEvictions int64 `json:"slow_client_evictions"`
 }
 
 // hubMetrics tracks lifetime counters for the hub.
 type hubMetrics struct {
-	eventsPublished atomic.Int64
-	eventsDropped   atomic.Int64
+	eventsPublished     atomic.Int64
+	eventsDropped       atomic.Int64
+	slowClientEvictions atomic.Int64
 
 	// Per-event-type counters
 	eventsByType   map[string]*atomic.Int64
