@@ -527,14 +527,14 @@ type mockSubscriber struct {
 	messages chan string
 }
 
-func (m *mockSubscriber) Subscribe(ctx context.Context, channel string, onMessage func(string)) error {
+func (m *mockSubscriber) Subscribe(ctx context.Context, channel string, onMessage func(string, string)) error {
 	for {
 		select {
 		case msg, ok := <-m.messages:
 			if !ok {
 				return nil
 			}
-			onMessage(msg)
+			onMessage(channel, msg)
 		case <-ctx.Done():
 			return ctx.Err()
 		}
@@ -662,7 +662,7 @@ type errorSubscriber struct {
 	mu        sync.Mutex
 }
 
-func (e *errorSubscriber) Subscribe(ctx context.Context, _ string, _ func(string)) error {
+func (e *errorSubscriber) Subscribe(ctx context.Context, _ string, _ func(string, string)) error {
 	e.mu.Lock()
 	e.callCount++
 	e.mu.Unlock()
@@ -1539,5 +1539,141 @@ func TestShutdown_WithContextTimeout(t *testing.T) {
 	err := hub.Shutdown(ctx)
 	if err != nil {
 		t.Errorf("shutdown should succeed, got: %v", err)
+	}
+}
+
+func TestPublishToConnection_Unicast(t *testing.T) {
+	t.Parallel()
+
+	var (
+		mu     sync.Mutex
+		connID string
+	)
+	hub := New(HubConfig{
+		FlushInterval:     100 * time.Millisecond,
+		HeartbeatInterval: 30 * time.Second,
+		OnConnect: func(_ fiber.Ctx, conn *Connection) error {
+			conn.Topics = []string{"test"}
+			mu.Lock()
+			connID = conn.ID
+			mu.Unlock()
+			return nil
+		},
+	})
+	defer hub.Shutdown(context.TODO())
+
+	app := fiber.New()
+	app.Get("/events", hub.Handler())
+
+	baseURL, cleanup := testServer(t, app)
+	defer cleanup()
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	go client.Get(baseURL + "/events") //nolint:errcheck
+
+	// Wait for connection to register
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		id := connID
+		mu.Unlock()
+		if id != "" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	mu.Lock()
+	id := connID
+	mu.Unlock()
+	if id == "" {
+		t.Fatal("connection did not register")
+	}
+
+	delivered := hub.PublishToConnection(id, Event{
+		Type:     "unicast",
+		Data:     "hello-direct",
+		Priority: PriorityInstant,
+	})
+	if !delivered {
+		t.Error("PublishToConnection should return true for active connection")
+	}
+
+	notDelivered := hub.PublishToConnection("nonexistent-id", Event{Type: "x"})
+	if notDelivered {
+		t.Error("PublishToConnection should return false for unknown connection")
+	}
+}
+
+func TestCloseWhere_ByMetadata(t *testing.T) {
+	t.Parallel()
+
+	hub := New(HubConfig{
+		FlushInterval:     100 * time.Millisecond,
+		HeartbeatInterval: 30 * time.Second,
+		OnConnect: func(_ fiber.Ctx, conn *Connection) error {
+			conn.Topics = []string{"test"}
+			conn.Metadata["tenant_id"] = "t_abc"
+			return nil
+		},
+	})
+	defer hub.Shutdown(context.TODO())
+
+	app := fiber.New()
+	app.Get("/events", hub.Handler())
+
+	baseURL, cleanup := testServer(t, app)
+	defer cleanup()
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	for range 2 {
+		go client.Get(baseURL + "/events") //nolint:errcheck
+	}
+
+	// Wait for both connections
+	deadline := time.Now().Add(2 * time.Second)
+	for hub.Stats().ActiveConnections < 2 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if hub.Stats().ActiveConnections < 2 {
+		t.Fatal("connections did not register in time")
+	}
+
+	// CloseWhere matching tenant
+	closed := hub.CloseWhere(func(conn *Connection) bool {
+		return conn.Metadata["tenant_id"] == "t_abc"
+	})
+	if closed != 2 {
+		t.Errorf("expected 2 closed, got %d", closed)
+	}
+}
+
+func TestFanOut_ChannelNameInCallback(t *testing.T) {
+	t.Parallel()
+
+	// Verify that PubSubSubscriber.Subscribe receives the channel name
+	// in its callback — enabling pattern subscriptions to extract tenant IDs
+	// from channel names like "orders:tenant_xyz".
+	receivedChannel := make(chan string, 1)
+
+	sub := &mockSubscriber{messages: make(chan string, 1)}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	go func() {
+		sub.Subscribe(ctx, "orders:tenant_xyz", func(channel, _ string) { //nolint:errcheck
+			receivedChannel <- channel
+		})
+	}()
+
+	sub.messages <- "ping"
+
+	select {
+	case ch := <-receivedChannel:
+		if ch != "orders:tenant_xyz" {
+			t.Errorf("expected channel name %q, got %q", "orders:tenant_xyz", ch)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("channel name not received in callback")
 	}
 }

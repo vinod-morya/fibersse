@@ -12,8 +12,10 @@ import (
 type PubSubSubscriber interface {
 	// Subscribe listens on the given channel and sends received messages
 	// to the provided callback. It blocks until ctx is cancelled.
-	// The callback receives the raw message payload as a string.
-	Subscribe(ctx context.Context, channel string, onMessage func(payload string)) error
+	//
+	// The callback receives both the channel name (useful for pattern
+	// subscriptions like "notif:*") and the raw message payload.
+	Subscribe(ctx context.Context, channel string, onMessage func(channel, payload string)) error
 }
 
 // FanOutConfig configures auto-fan-out from an external pub/sub to the hub.
@@ -76,7 +78,7 @@ func (h *Hub) FanOut(cfg FanOutConfig) context.CancelFunc {
 			default:
 			}
 
-			err := cfg.Subscriber.Subscribe(ctx, cfg.Channel, func(payload string) {
+			err := cfg.Subscriber.Subscribe(ctx, cfg.Channel, func(channel, payload string) {
 				event := h.buildFanOutEvent(cfg, topic, payload)
 				if event != nil {
 					h.Publish(*event)

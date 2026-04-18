@@ -180,6 +180,52 @@ func (h *Hub) Publish(event Event) {
 	}
 }
 
+// PublishToConnection sends an event directly to a single connection by ID,
+// bypassing topic and group routing. Useful when a worker knows the exact
+// connection that initiated a long-running job.
+//
+//	hub.PublishToConnection(conn.ID, fibersse.Event{
+//	    Type: "job_done", Data: result, Priority: fibersse.PriorityInstant,
+//	})
+func (h *Hub) PublishToConnection(connID string, event Event) bool {
+	h.mu.RLock()
+	conn, ok := h.connections[connID]
+	h.mu.RUnlock()
+	if !ok || conn.IsClosed() {
+		return false
+	}
+	me := marshalEvent(&event)
+	return conn.trySend(me)
+}
+
+// CloseWhere closes all connections for which the predicate returns true.
+// Use for account suspension, plan enforcement, or any metadata-based eviction.
+//
+//	// Kick all connections for a suspended tenant:
+//	hub.CloseWhere(func(conn *fibersse.Connection) bool {
+//	    return conn.Metadata["tenant_id"] == suspendedID
+//	})
+//
+//	// Kick a specific user across all their tabs:
+//	hub.CloseWhere(func(conn *fibersse.Connection) bool {
+//	    return conn.Metadata["user_id"] == revokedUserID
+//	})
+func (h *Hub) CloseWhere(predicate func(*Connection) bool) int {
+	h.mu.RLock()
+	var targets []*Connection
+	for _, conn := range h.connections {
+		if predicate(conn) {
+			targets = append(targets, conn)
+		}
+	}
+	h.mu.RUnlock()
+
+	for _, conn := range targets {
+		conn.Close()
+	}
+	return len(targets)
+}
+
 // SetPaused pauses or resumes a connection by ID. Paused connections
 // skip P1/P2 events (visibility hint for hidden browser tabs).
 // P0 (instant) events are always delivered regardless.
@@ -657,8 +703,9 @@ func (h *Hub) flushAll() {
 }
 
 // sendHeartbeats sends a comment to connections that haven't received
-// real data recently. This keeps the TCP connection alive and detects
-// silent disconnects on the next flush.
+// real data recently. Idle connections (no events in >2× HeartbeatInterval)
+// get heartbeats at the normal interval; active connections skip them since
+// real events already keep the stream alive.
 func (h *Hub) sendHeartbeats() {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -669,13 +716,14 @@ func (h *Hub) sendHeartbeats() {
 			continue
 		}
 		lastWrite, _ := conn.lastWrite.Load().(time.Time)
-		if now.Sub(lastWrite) >= h.cfg.HeartbeatInterval {
-			// Send a heartbeat as a zero-type event via the send channel
-			hb := MarshaledEvent{
-				ID: heartbeatMarker,
-			}
-			conn.trySend(hb)
+		idle := now.Sub(lastWrite)
+		// Active connections (received a real event recently) don't need
+		// heartbeats — the event already reset the proxy timeout.
+		if idle < h.cfg.HeartbeatInterval {
+			continue
 		}
+		hb := MarshaledEvent{ID: heartbeatMarker}
+		conn.trySend(hb)
 	}
 }
 
