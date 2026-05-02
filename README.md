@@ -34,6 +34,13 @@ hub.Invalidate("orders", order.ID, "created")  // → client refetches instantly
 
 **80-90% fewer API calls. Real-time UI. Zero polling.**
 
+> **Lineage:** `fibersse` predates and informed Fiber's official `middleware/sse`, merged in [PR #4239](https://github.com/gofiber/fiber/pull/4239). Findings from our review (`Stream.Context()` disconnect semantics, `c.Abandon()` ordering, panic-to-`OnClose` conversion, slow-consumer heartbeat caveat) all landed in the core middleware.
+>
+> **When to use which:**
+>
+> - Use Fiber's built-in `middleware/sse` if you only need a single-stream `Handler` API: one client, one stream, no fan-out / replay / multi-tenant routing.
+> - Use `fibersse` (this library) when you need any of: a Hub broker, topic routing with NATS-style wildcards, three priority lanes (instant / batched / coalesced last-writer-wins), tenant scoping by metadata, `Last-Event-ID` replay, Redis/NATS bridges, adaptive per-client throttling, or graceful Kubernetes-style drain. `fibersse` composes around the same Fiber `SendStreamWriter` transport, so you can adopt it incrementally alongside or in place of the core middleware.
+
 ## Why FiberSSE?
 
 ### 1. The Only SSE Library That Works on Fiber

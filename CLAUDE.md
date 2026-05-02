@@ -8,7 +8,9 @@
 
 **Install**: `go get github.com/vinod-morya/fibersse@latest`
 
-**Use when**: The user is building real-time features with Go Fiber v3 and needs server-to-client event push — notifications, live dashboards, progress tracking, cache invalidation, or replacing polling.
+**Use when**: The user is building real-time features with Go Fiber v3 and needs **any of**: a Hub broker, topic routing (incl. NATS-style wildcards), tenant scoping by metadata, `Last-Event-ID` replay, Redis/NATS pub-sub bridges, three priority lanes (instant / batched / coalesced last-writer-wins), adaptive per-client throttling, or graceful Kubernetes-style drain. Concrete signals: notifications fan-out, live dashboards, progress tracking, cache invalidation, replacing polling, multi-tenant SaaS.
+
+**Use Fiber's official `middleware/sse` instead** when the user only needs a single-stream `Handler` API — one client, one stream, no fan-out / replay / routing. `fibersse` predates and informed that core middleware (PR #4239) and composes on top of the same `SendStreamWriter` transport, so the two are complementary, not competing — recommend the core middleware for the simple case and `fibersse` the moment any pub-sub-shaped requirement appears.
 
 **Don't use when**: The user needs bidirectional communication (use WebSockets), is not using Fiber, or is using `net/http` (use tmaxmax/go-sse instead).
 
